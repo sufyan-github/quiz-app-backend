@@ -7,7 +7,8 @@
     "test": "jest",
     "build": "echo 'No build step required. Using tsx.'",
     "start": "npx tsx src/app.ts",
-    "dev": "npx nodemon --exec npx tsx src/app.ts"
+    "dev": "npx nodemon --exec npx tsx src/app.ts",
+    "seed": "npx tsx src/prisma/seed.ts"
   },
   "keywords": [],
   "author": "",
