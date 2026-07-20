@@ -1,0 +1,458 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library"
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  INSTRUCTOR
+  STUDENT
+}
+
+enum QuestionType {
+  MCQ
+  MULTIPLE_SELECT
+  TRUE_FALSE
+  FILL_BLANK
+  SHORT_ANSWER
+  LONG_ANSWER
+  NUMERICAL
+  CODING
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+model User {
+  id                  String  @id @default(uuid())
+  email               String  @unique
+  password            String?
+  mobile              String? @unique
+  subscription_status String  @default("UNSUBSCRIBED")
+  coins               Int     @default(0)
+  xp                  Int     @default(0)
+  level               Int     @default(1)
+  streak              Int     @default(0)
+
+  role      Role     @default(STUDENT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions  Subscription[]
+  profile        Profile?
+  settings       UserSettings?
+  activityLogs   ActivityLog[]
+  deviceSessions DeviceSession[]
+  bookmarks      Bookmark[]
+  achievements   UserAchievement[]
+
+  examsCreated    Exam[]           @relation("ExamCreator")
+  attempts        ExamAttempt[]
+  certificates    Certificate[]
+  notifications   Notification[]
+  aiConversations AiConversation[]
+  aiFeedbacks     AiFeedback[]
+}
+
+model Profile {
+  id         String    @id @default(uuid())
+  userId     String    @unique
+  user       User      @relation(fields: [userId], references: [id])
+  name       String
+  username   String?   @unique
+  employeeId String?
+  rollNumber String?
+  regNumber  String?
+  gender     String?
+  dob        DateTime?
+  bloodGroup String?
+
+  photo      String?
+  coverPhoto String?
+
+  phone       String?
+  altPhone    String?
+  address     String?
+  city        String?
+  state       String?
+  district    String?
+  postalCode  String?
+  country     String?
+  nationality String?
+
+  // Academic / Student Info
+  institution  String?
+  department   String?
+  program      String?
+  semester     String?
+  batch        String?
+  session      String?
+  academicYear String?
+
+  // Professional / Admin Info
+  designation   String?
+  employeeType  String?
+  joiningDate   DateTime?
+  experience    String?
+  skills        String?
+  qualification String?
+  orgName       String?
+  orgLogo       String?
+  orgWebsite    String?
+
+  // Bio & Social
+  shortBio   String?
+  aboutMe    String?
+  interests  String?
+  careerGoal String?
+
+  linkedin  String?
+  github    String?
+  portfolio String?
+  facebook  String?
+  twitter   String?
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  subjects    Subject[]
+}
+
+model Subject {
+  id         String     @id @default(uuid())
+  name       String
+  categoryId String
+  category   Category   @relation(fields: [categoryId], references: [id])
+  topics     Topic[]
+  exams      Exam[]
+  questions  Question[]
+}
+
+model Topic {
+  id                   String                @id @default(uuid())
+  name                 String
+  subjectId            String
+  subject              Subject               @relation(fields: [subjectId], references: [id])
+  questions            Question[]
+  exams                Exam[]
+  lessons              Lesson[]
+  aiGeneratedQuestions AiGeneratedQuestion[]
+}
+
+model Question {
+  id            String       @id @default(uuid())
+  text          String
+  type          QuestionType
+  difficulty    Difficulty
+  marks         Float        @default(1.0)
+  negativeMarks Float        @default(0.0)
+  explanation   String?
+  hint          String?
+
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+  topicId   String?
+  topic     Topic?   @relation(fields: [topicId], references: [id])
+
+  options        Option[]
+  examQuestions  ExamQuestion[]
+  studentAnswers StudentAnswer[]
+}
+
+model Option {
+  id         String   @id @default(uuid())
+  text       String
+  isCorrect  Boolean  @default(false)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id])
+}
+
+model Exam {
+  id           String  @id @default(uuid())
+  title        String
+  description  String?
+  instructions String?
+
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+  topicId   String?
+  topic     Topic?   @relation(fields: [topicId], references: [id])
+
+  creatorId String
+  creator   User   @relation("ExamCreator", fields: [creatorId], references: [id])
+
+  startDate    DateTime?
+  endDate      DateTime?
+  durationMins Int? // Overall timer
+  passingMarks Float     @default(40.0)
+  maxAttempts  Int? // Null means unlimited
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  questions ExamQuestion[]
+  attempts  ExamAttempt[]
+}
+
+model ExamQuestion {
+  id         String   @id @default(uuid())
+  examId     String
+  exam       Exam     @relation(fields: [examId], references: [id])
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id])
+  order      Int      @default(0)
+}
+
+model ExamAttempt {
+  id        String @id @default(uuid())
+  examId    String
+  exam      Exam   @relation(fields: [examId], references: [id])
+  studentId String
+  student   User   @relation(fields: [studentId], references: [id])
+
+  startTime DateTime  @default(now())
+  endTime   DateTime?
+  status    String    @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED, ABANDONED
+
+  score    Float?
+  isPassed Boolean?
+
+  answers StudentAnswer[]
+  result  Result?
+}
+
+model StudentAnswer {
+  id         String      @id @default(uuid())
+  attemptId  String
+  attempt    ExamAttempt @relation(fields: [attemptId], references: [id])
+  questionId String
+  question   Question    @relation(fields: [questionId], references: [id])
+
+  selectedOptionId String? // For MCQ
+  textAnswer       String? // For fill in blanks / short answer
+  isCorrect        Boolean?
+  marksAwarded     Float?
+}
+
+model Result {
+  id            String      @id @default(uuid())
+  attemptId     String      @unique
+  attempt       ExamAttempt @relation(fields: [attemptId], references: [id])
+  totalScore    Float
+  correctCount  Int
+  wrongCount    Int
+  skippedCount  Int
+  negativeMarks Float
+  timeTakenSecs Int
+  accuracy      Float
+  grade         String?
+
+  certificate Certificate?
+}
+
+model Certificate {
+  id             String   @id @default(uuid())
+  resultId       String   @unique
+  result         Result   @relation(fields: [resultId], references: [id])
+  studentId      String
+  student        User     @relation(fields: [studentId], references: [id])
+  certificateUrl String
+  issuedAt       DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model UserSettings {
+  id       String @id @default(uuid())
+  userId   String @unique
+  user     User   @relation(fields: [userId], references: [id])
+  theme    String @default("light") // light, dark, system
+  language String @default("en")
+  timezone String @default("UTC")
+
+  // Notification Prefs
+  emailNotif Boolean @default(true)
+  smsNotif   Boolean @default(false)
+  pushNotif  Boolean @default(true)
+
+  // 2FA
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  module    String?
+  ipAddress String?
+  device    String?
+  browser   String?
+  os        String?
+  createdAt DateTime @default(now())
+}
+
+model DeviceSession {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  deviceId   String?
+  deviceName String?
+  ipAddress  String?
+  location   String?
+  lastActive DateTime @default(now())
+  isCurrent  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model Bookmark {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  itemType String // QUESTION, EXAM, SUBJECT
+  itemId   String
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, itemType, itemId])
+}
+
+model Achievement {
+  id          String            @id @default(uuid())
+  name        String
+  description String?
+  icon        String?
+  points      Int               @default(0)
+  users       UserAchievement[]
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  earnedAt      DateTime    @default(now())
+
+  @@unique([userId, achievementId])
+}
+
+model Subscription {
+  id            String   @id @default(uuid())
+  subscriber_id String
+  user          User     @relation(fields: [subscriber_id], references: [id])
+  status        String   @default("REGISTERED") // REGISTERED, UNSUBSCRIBED
+  frequency     String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+}
+
+model SmsLog {
+  id        String   @id @default(uuid())
+  mobile    String
+  message   String
+  status    String
+  createdAt DateTime @default(now())
+}
+
+model UssdLog {
+  id        String   @id @default(uuid())
+  session   String
+  request   String
+  response  String
+  createdAt DateTime @default(now())
+}
+
+// ==========================================
+// LEARNING MODULE
+// ==========================================
+
+model Lesson {
+  id        String   @id @default(uuid())
+  title     String
+  content   String? // Markdown content
+  topicId   String
+  topic     Topic    @relation(fields: [topicId], references: [id])
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  resources LessonResource[]
+}
+
+model LessonResource {
+  id        String   @id @default(uuid())
+  lessonId  String
+  lesson    Lesson   @relation(fields: [lessonId], references: [id])
+  type      String // PDF, VIDEO, IMAGE, LINK
+  url       String
+  title     String?
+  createdAt DateTime @default(now())
+}
+
+// ==========================================
+// AI INTEGRATION
+// ==========================================
+
+model AiConversation {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  topic     String?
+  context   String? // Question ID or Lesson ID context
+  messages  Json // Array of { role: 'user'|'assistant', content: string }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AiFeedback {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  targetType String // QUESTION, LESSON, EXAM
+  targetId   String
+  feedback   String // The AI generated hint/explanation
+  createdAt  DateTime @default(now())
+}
+
+model AiGeneratedQuestion {
+  id          String   @id @default(uuid())
+  topicId     String
+  topic       Topic    @relation(fields: [topicId], references: [id])
+  generatedBy String // Admin User ID
+  content     Json // The generated question payload
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt   DateTime @default(now())
+}
+
+model AiPromptTemplate {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  description  String?
+  systemPrompt String
+  userPrompt   String?
+  model        String   @default("gpt-4o")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
