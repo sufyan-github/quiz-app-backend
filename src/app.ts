@@ -1,7 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import http from 'http';
+import { prisma } from './prisma';
 import { realtimeService } from './services/realtimeService';
+
 import authRoutes from './routes/authRoutes';
 import categoryRoutes from './routes/categoryRoutes';
 import questionRoutes from './routes/questionRoutes';
@@ -22,10 +24,32 @@ const port = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
+// 1. Root Endpoint (GET /)
+app.get('/', (req, res) => {
+  res.json({
+    status: "OK",
+    message: "Quiz AI Backend Running"
+  });
 });
 
+// 2. Health Check Endpoint (GET /api/health)
+app.get('/api/health', async (req, res) => {
+  let dbStatus = 'disconnected';
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    dbStatus = 'connected';
+  } catch (err: any) {
+    dbStatus = `error: ${err?.message || 'DB connection failed'}`;
+  }
+
+  res.json({
+    success: true,
+    database: dbStatus,
+    server: "running"
+  });
+});
+
+// 3. Registered API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/core', categoryRoutes);
@@ -46,7 +70,7 @@ const server = http.createServer(app);
 realtimeService.init(server);
 
 server.listen(port, () => {
-  console.log(`Server and Realtime Socket.IO running on port ${port}`);
+  console.log(`[Server] Quiz AI Backend & Socket.IO running on port ${port}`);
 });
 
 export default app;
