@@ -60,13 +60,21 @@ exports.bdappsService = {
                 retryAfterSec: rateCheck.retryAfterSec
             };
         }
-        if (!bdapps_1.bdappsConfig.appId) {
-            console.log(`[BDAPPS MOCK MODE] BDAPPS_APP_ID is missing. Returning mock OTP reference for ${cleanDigits}.`);
+        if (!bdapps_1.bdappsConfig.appId || !bdapps_1.bdappsConfig.password) {
+            console.error(`[BDApps Error] BDAPPS_APP_ID or BDAPPS_PASSWORD is not configured in environment variables.`);
+            if (process.env.NODE_ENV === 'development') {
+                console.log(`[BDAPPS DEV MODE] Returning dev reference for ${cleanDigits}. In production, configure BDAPPS credentials.`);
+                return {
+                    success: true,
+                    referenceNo: `mock_ref_${cleanDigits}`,
+                    statusCode: 'S1000',
+                    statusDetail: 'Success (Dev Mode Credentials Missing)'
+                };
+            }
             return {
-                success: true,
-                referenceNo: `mock_ref_${cleanDigits}`,
-                statusCode: 'S1000',
-                statusDetail: 'Success (Dev Mock)'
+                success: false,
+                statusCode: 'E1325',
+                statusDetail: 'BDApps application credentials missing'
             };
         }
         const requestData = {
@@ -113,13 +121,15 @@ exports.bdappsService = {
                 console.warn(`[BDApps OTP Error] StatusCode: ${data?.statusCode} | StatusDetail: ${errorDetail}`);
                 if (data?.statusCode === 'E1360' || errorDetail.includes('allowed-host-address') || errorDetail.includes('IP address')) {
                     console.warn(`[BDApps Notice] BDApps Server IP Restriction triggered (Code E1360). Server IP is not whitelisted in BDApps Portal.`);
-                    console.warn(`[BDApps Notice] Falling back to Dev Mock OTP for local testing. In production, whitelist server IP in developer.bdapps.com.`);
-                    return {
-                        success: true,
-                        referenceNo: `mock_ref_${cleanDigits}`,
-                        statusCode: 'S1000',
-                        statusDetail: 'Success (Dev Fallback - IP Not Whitelisted in BDApps Portal)'
-                    };
+                    if (process.env.NODE_ENV === 'development') {
+                        console.warn(`[BDApps Notice] Falling back to Dev reference for local testing.`);
+                        return {
+                            success: true,
+                            referenceNo: `mock_ref_${cleanDigits}`,
+                            statusCode: 'S1000',
+                            statusDetail: 'Success (Dev Fallback - IP Not Whitelisted in BDApps Portal)'
+                        };
+                    }
                 }
                 return {
                     success: false,
@@ -133,12 +143,19 @@ exports.bdappsService = {
                     await new Promise(r => setTimeout(r, 1000));
                     continue;
                 }
-                console.warn(`[BDApps Notice] Network error calling BDApps gateway (${err.message}). Returning Dev Mock fallback.`);
+                if (process.env.NODE_ENV === 'development') {
+                    console.warn(`[BDApps Notice] Network error calling BDApps gateway (${err.message}). Returning Dev reference.`);
+                    return {
+                        success: true,
+                        referenceNo: `mock_ref_${cleanDigits}`,
+                        statusCode: 'S1000',
+                        statusDetail: 'Success (Dev Fallback - Network Error)'
+                    };
+                }
                 return {
-                    success: true,
-                    referenceNo: `mock_ref_${cleanDigits}`,
-                    statusCode: 'S1000',
-                    statusDetail: 'Success (Dev Fallback - Network Error)'
+                    success: false,
+                    statusCode: 'E1601',
+                    statusDetail: `Gateway communication failure: ${err.message}`
                 };
             }
         }
@@ -149,16 +166,30 @@ exports.bdappsService = {
         };
     },
     async verifyOtp(referenceNo, otp) {
-        if (referenceNo.startsWith('mock_ref_') || !bdapps_1.bdappsConfig.appId) {
-            const mockMobile = referenceNo.startsWith('mock_ref_')
-                ? referenceNo.replace('mock_ref_', '')
-                : '01896283924';
-            console.log(`[BDAPPS MOCK VERIFY] Verifying mock reference ${referenceNo} with code ${otp} for mobile ${mockMobile}.`);
+        if (!bdapps_1.bdappsConfig.appId || !bdapps_1.bdappsConfig.password || referenceNo.startsWith('mock_ref_')) {
+            const cleanDigits = referenceNo.replace('mock_ref_', '') || '01896283924';
+            if (process.env.NODE_ENV === 'development') {
+                // STRICT DEV MODE OTP CHECK: Only allow fixed dev OTP '123456' during offline local development
+                if (otp === '123456') {
+                    console.log(`[BDAPPS DEV VERIFY] Dev mode valid OTP code 123456 verified for reference ${referenceNo}.`);
+                    return {
+                        statusCode: 'S1000',
+                        statusDetail: 'Success (Dev Verified)',
+                        subscriberId: `tel:88${cleanDigits}`,
+                        subscriptionStatus: 'REGISTERED'
+                    };
+                }
+                else {
+                    console.warn(`[BDAPPS DEV VERIFY REJECT] Invalid dev OTP code '${otp}' entered for reference ${referenceNo}.`);
+                    return {
+                        statusCode: 'E1357',
+                        statusDetail: 'Invalid or wrong OTP code entered.'
+                    };
+                }
+            }
             return {
-                statusCode: 'S1000',
-                statusDetail: 'Success (Mock Verified)',
-                subscriberId: `tel:88${mockMobile}`,
-                subscriptionStatus: 'REGISTERED'
+                statusCode: 'E1325',
+                statusDetail: 'Invalid reference or BDApps credentials missing'
             };
         }
         const requestData = {

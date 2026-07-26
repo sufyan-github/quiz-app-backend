@@ -52,6 +52,7 @@ app.get('/api/health', async (req, res) => {
 app.use('/api/auth', authRoutes_1.default);
 app.use('/api/users', userRoutes_1.default);
 app.use('/api/core', categoryRoutes_1.default);
+app.use('/api', categoryRoutes_1.default); // Mounts /api/categories, /api/subjects, /api/topics
 app.use('/api/questions', questionRoutes_1.default);
 app.use('/api/exams', examRoutes_1.default);
 app.use('/api/admin', adminRoutes_1.default);
