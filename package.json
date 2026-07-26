@@ -2,10 +2,10 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/src/app.js",
   "scripts": {
     "test": "jest",
-    "build": "tsc",
+    "build": "npx prisma generate && tsc",
     "start": "node dist/src/app.js",
     "dev": "npx nodemon --exec npx tsx src/app.ts",
     "seed": "npx tsx src/prisma/seed.ts"
