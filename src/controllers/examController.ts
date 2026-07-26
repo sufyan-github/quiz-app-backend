@@ -308,7 +308,7 @@ export const addQuestionToExam = async (req: Request, res: Response): Promise<vo
             isCorrect: opt.isCorrect || false
           }))
         },
-        exams: {
+        examQuestions: {
           create: {
             examId,
             order: nextOrder
