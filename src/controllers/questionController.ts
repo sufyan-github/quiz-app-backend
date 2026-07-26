@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { realtimeService } from '../services/realtimeService';
 
 export const getQuestions = async (req: Request, res: Response) => {
   try {
     const questions = await prisma.question.findMany({
-      include: { options: true, subject: true, topic: true }
+      include: { options: true, subject: true, topic: true },
+      orderBy: { text: 'asc' }
     });
     res.json(questions);
   } catch (error) {
@@ -14,7 +16,7 @@ export const getQuestions = async (req: Request, res: Response) => {
 
 export const createQuestion = async (req: Request, res: Response) => {
   try {
-    const { text, type, difficulty, marks, negativeMarks, explanation, hint, subjectId, topicId, options } = req.body;
+    const { text, type, difficulty, marks, negativeMarks, language, explanation, hint, subjectId, topicId, options } = req.body;
     
     const question = await prisma.question.create({
       data: {
@@ -23,6 +25,7 @@ export const createQuestion = async (req: Request, res: Response) => {
         difficulty,
         marks,
         negativeMarks,
+        language: language || 'english',
         explanation,
         hint,
         subjectId,
@@ -33,6 +36,8 @@ export const createQuestion = async (req: Request, res: Response) => {
       },
       include: { options: true }
     });
+
+    realtimeService.emit('questions', 'question_created', { question });
     
     res.status(201).json(question);
   } catch (error) {
@@ -42,7 +47,7 @@ export const createQuestion = async (req: Request, res: Response) => {
 
 export const deleteQuestion = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     // Delete related options first
     await prisma.option.deleteMany({
@@ -63,6 +68,8 @@ export const deleteQuestion = async (req: Request, res: Response): Promise<void>
     await prisma.question.delete({
       where: { id }
     });
+
+    realtimeService.emit('questions', 'question_deleted', { id });
     
     res.json({ success: true, message: 'Question deleted successfully' });
   } catch (error) {
@@ -73,8 +80,8 @@ export const deleteQuestion = async (req: Request, res: Response): Promise<void>
 
 export const updateQuestion = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const { text, type, difficulty, marks, negativeMarks, explanation, hint, subjectId, topicId, options } = req.body;
+    const id = req.params.id as string;
+    const { text, type, difficulty, marks, negativeMarks, language, explanation, hint, subjectId, topicId, options } = req.body;
 
     // Update question fields
     const question = await prisma.question.update({
@@ -85,6 +92,7 @@ export const updateQuestion = async (req: Request, res: Response): Promise<void>
         difficulty,
         marks,
         negativeMarks,
+        language: language || 'english',
         explanation,
         hint,
         subjectId,
@@ -113,6 +121,8 @@ export const updateQuestion = async (req: Request, res: Response): Promise<void>
       where: { id },
       include: { options: true }
     });
+
+    realtimeService.emit('questions', 'question_updated', { question: updatedQuestion });
 
     res.json(updatedQuestion);
   } catch (error) {
@@ -176,6 +186,7 @@ export const importQuestions = async (req: Request, res: Response): Promise<void
       const difficulty = (row['difficulty'] || 'MEDIUM').toUpperCase() as any;
       const explanation = row['explanation'] || '';
       const topicName = row['topicname'] || '';
+      const language = (row['language'] || 'english').toLowerCase();
 
       if (!text) continue;
 
@@ -223,6 +234,7 @@ export const importQuestions = async (req: Request, res: Response): Promise<void
           type: 'MCQ',
           difficulty,
           marks: 5,
+          language: language,
           explanation,
           topicId,
           subjectId,

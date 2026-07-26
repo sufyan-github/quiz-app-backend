@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
-import { prisma } from './prisma';
+import http from 'http';
+import { realtimeService } from './services/realtimeService';
 import authRoutes from './routes/authRoutes';
 import categoryRoutes from './routes/categoryRoutes';
 import questionRoutes from './routes/questionRoutes';
@@ -12,9 +13,11 @@ import bdappsRoutes from './routes/bdappsRoutes';
 import quizRoutes from './routes/quizRoutes';
 import aiRoutes from './routes/aiRoutes';
 import lessonRoutes from './routes/lessonRoutes';
+import paymentRoutes from './routes/paymentRoutes';
+import syncRoutes from './routes/syncRoutes';
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 4000;
 
 app.use(cors());
 app.use(express.json());
@@ -34,9 +37,16 @@ app.use('/api/bdapps', bdappsRoutes);
 app.use('/api/app', quizRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/lessons', lessonRoutes);
+app.use('/api/payment', paymentRoutes);
+app.use('/api/sync', syncRoutes);
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+const server = http.createServer(app);
+
+// Initialize Socket.IO Realtime Service
+realtimeService.init(server);
+
+server.listen(port, () => {
+  console.log(`Server and Realtime Socket.IO running on port ${port}`);
 });
 
 export default app;

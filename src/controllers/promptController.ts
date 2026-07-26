@@ -16,7 +16,7 @@ export const getPromptTemplates = async (req: AuthRequest, res: Response): Promi
 
 export const updatePromptTemplate = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { systemPrompt, userPrompt, model, isActive } = req.body;
     const adminId = req.user?.userId;
 

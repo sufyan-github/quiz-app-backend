@@ -45,7 +45,7 @@ export const createExam = async (req: Request, res: Response) => {
 
 export const updateExam = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { 
       title, description, instructions, subjectId, topicId, 
       startDate, endDate, durationMins, passingMarks, maxAttempts 
@@ -69,7 +69,7 @@ export const updateExam = async (req: Request, res: Response) => {
 
 export const deleteExam = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     await prisma.exam.delete({ where: { id } });
     res.json({ message: 'Exam deleted' });
   } catch (error) {
@@ -203,12 +203,12 @@ export const submitExam = async (req: Request, res: Response): Promise<void> => 
 
 export const generateCertificate = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { attemptId } = req.params;
+    const attemptId = req.params.attemptId as string;
     
     const attempt = await prisma.examAttempt.findUnique({
       where: { id: attemptId },
       include: {
-        user: true,
+        student: { include: { profile: true } },
         exam: true,
         result: true
       }
@@ -239,7 +239,8 @@ export const generateCertificate = async (req: Request, res: Response): Promise<
     doc.font('Helvetica').fontSize(20).text('This is to certify that', { align: 'center' });
     doc.moveDown();
     
-    doc.font('Helvetica-Bold').fontSize(30).text(`${attempt.user.firstName} ${attempt.user.lastName}`, { align: 'center' });
+    const studentName = attempt.student.profile?.name || attempt.student.email;
+    doc.font('Helvetica-Bold').fontSize(30).text(studentName, { align: 'center' });
     doc.moveDown();
     
     doc.font('Helvetica').fontSize(20).text(`has successfully completed the exam`, { align: 'center' });
@@ -250,7 +251,7 @@ export const generateCertificate = async (req: Request, res: Response): Promise<
     
     doc.font('Helvetica').fontSize(16).text(`Score: ${attempt.result.totalScore} | Accuracy: ${attempt.result.accuracy.toFixed(2)}%`, { align: 'center' });
     
-    const dateStr = attempt.result.createdAt.toLocaleDateString();
+    const dateStr = (attempt.endTime || attempt.startTime).toLocaleDateString();
     doc.font('Helvetica').fontSize(16).text(`Date: ${dateStr}`, 50, 450);
     doc.font('Helvetica').fontSize(16).text(`QuizMaster Pro`, doc.page.width - 200, 450);
     
@@ -267,12 +268,11 @@ export const getAllResults = async (req: Request, res: Response): Promise<void> 
       include: {
         attempt: {
           include: {
-            user: true,
+            student: { include: { profile: true } },
             exam: true
           }
         }
-      },
-      orderBy: { createdAt: 'desc' }
+      }
     });
     res.json(results);
   } catch (error) {
@@ -283,7 +283,7 @@ export const getAllResults = async (req: Request, res: Response): Promise<void> 
 
 export const addQuestionToExam = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { examId } = req.params;
+    const examId = req.params.examId as string;
     const { text, type, difficulty, marks, negativeMarks, options } = req.body;
     
     // First, find the current max order for this exam's questions
@@ -327,7 +327,7 @@ export const addQuestionToExam = async (req: Request, res: Response): Promise<vo
 
 export const deleteQuestion = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { questionId } = req.params;
+    const questionId = req.params.questionId as string;
     await prisma.question.delete({ where: { id: questionId } });
     res.json({ message: 'Question deleted' });
   } catch (error) {

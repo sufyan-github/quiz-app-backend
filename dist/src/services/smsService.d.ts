@@ -1,0 +1,28 @@
+export declare const smsService: {
+    /**
+     * Helper to fetch active SMS config or create default one.
+     */
+    getConfig(): Promise<{
+        id: string;
+        provider: string;
+        costPerSms: number;
+        senderId: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    /**
+     * Send SMS to a specific mobile number (Student or Guardian)
+     */
+    sendSms(mobile: string, message: string, userId?: string): Promise<{
+        id: string;
+        mobile: string;
+        message: string;
+        status: string;
+        createdAt: Date;
+    }>;
+    /**
+     * Send notification to user AND their linked guardian (if configured)
+     */
+    notifyUserAndGuardian(userId: string, studentMsg: string, guardianMsg: string): Promise<void>;
+};
+//# sourceMappingURL=smsService.d.ts.map

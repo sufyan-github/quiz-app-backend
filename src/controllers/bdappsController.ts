@@ -7,7 +7,7 @@ export const bdappsController = {
   
   async sendOtp(req: Request, res: Response): Promise<void> {
     try {
-      const rawMobile = req.body.user_mobile || '';
+      const rawMobile = req.body.user_mobile || req.body.phoneNumber || req.body.mobile || '';
       let digits = rawMobile.replace(/\D+/g, '');
 
       if (digits.startsWith('880') && digits.length === 13) {
@@ -17,7 +17,7 @@ export const bdappsController = {
       }
 
       if (!/^01[3-9][0-9]{8}$/.test(digits)) {
-        res.status(400).json({ success: false, message: 'Invalid mobile number format' });
+        res.status(400).json({ success: false, message: 'Invalid mobile number format. Must be an 11-digit BD mobile number (e.g., 01896283924).' });
         return;
       }
 
@@ -35,7 +35,8 @@ export const bdappsController = {
         res.json({
           success: false,
           message: data.statusDetail || 'OTP reference not returned',
-          statusCode: data.statusCode
+          statusCode: data.statusCode,
+          retryAfterSec: data.retryAfterSec
         });
       }
 
@@ -47,10 +48,11 @@ export const bdappsController = {
 
   async verifyOtp(req: Request, res: Response): Promise<void> {
     try {
-      const { Otp, referenceNo } = req.body;
+      const Otp = req.body.Otp || req.body.otp || req.body.code;
+      const referenceNo = req.body.referenceNo || req.body.ref;
 
       if (!Otp || !referenceNo) {
-        res.status(400).json({ statusCode: 'FAILED', message: 'Missing OTP or referenceNo' });
+        res.status(400).json({ statusCode: 'FAILED', message: 'Missing OTP code or referenceNo' });
         return;
       }
 
@@ -83,7 +85,10 @@ export const bdappsController = {
         );
         
         res.json({
-          ...data,
+          statusCode: 'S1000',
+          statusDetail: data.statusDetail || 'Success',
+          subscriberId: data.subscriberId,
+          subscriptionStatus: data.subscriptionStatus || 'REGISTERED',
           token: token,
           user: {
             id: user.id,
@@ -118,6 +123,24 @@ export const bdappsController = {
     } catch (error: any) {
       console.error('Check Subscription Error:', error.message);
       res.status(500).json({ success: false, message: 'Server error' });
+    }
+  },
+
+  async handleNotification(req: Request, res: Response): Promise<void> {
+    try {
+      console.log('[BDApps Notification Webhook Received]', JSON.stringify(req.body, null, 2));
+      const { subscriberId, status } = req.body;
+      if (subscriberId) {
+        const mobile = subscriberId.replace('tel:88', '0');
+        await prisma.user.updateMany({
+          where: { mobile },
+          data: { subscription_status: status || 'REGISTERED' }
+        });
+      }
+      res.json({ statusCode: 'S1000', statusDetail: 'Success' });
+    } catch (error: any) {
+      console.error('[BDApps Webhook Error]', error.message);
+      res.status(500).json({ statusCode: 'FAILED', message: 'Webhook processing error' });
     }
   }
 };

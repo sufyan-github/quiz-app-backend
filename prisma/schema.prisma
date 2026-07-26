@@ -41,6 +41,9 @@ model User {
   xp                  Int     @default(0)
   level               Int     @default(1)
   streak              Int     @default(0)
+  freeExamsUsed       Int     @default(0)
+  freeAiGenerationsUsed Int   @default(0)
+  lastLoginDate       DateTime?
 
   role      Role     @default(STUDENT)
   createdAt DateTime @default(now())
@@ -54,13 +57,20 @@ model User {
   bookmarks      Bookmark[]
   achievements   UserAchievement[]
 
-  examsCreated    Exam[]           @relation("ExamCreator")
-  attempts        ExamAttempt[]
-  certificates    Certificate[]
-  notifications   Notification[]
-  aiConversations AiConversation[]
-  aiFeedbacks     AiFeedback[]
+  examsCreated      Exam[]           @relation("ExamCreator")
+  attempts          ExamAttempt[]
+  certificates      Certificate[]
+  notifications     Notification[]
+  aiConversations   AiConversation[]
+  aiFeedbacks       AiFeedback[]
+  userSubscriptions UserSubscription[]
+  transactions      Transaction[]
+  paidExams         PaidExamAccess[]
+  guardianLink      GuardianLink?
+  examHistories     ExamHistory[]
+  dailyLoginRewards DailyLoginReward[]
 }
+
 
 model Profile {
   id         String    @id @default(uuid())
@@ -156,6 +166,7 @@ model Question {
   difficulty    Difficulty
   marks         Float        @default(1.0)
   negativeMarks Float        @default(0.0)
+  language      String       @default("english")
   explanation   String?
   hint          String?
 
@@ -455,4 +466,167 @@ model AiPromptTemplate {
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+model SubscriptionPlan {
+  id             String   @id @default(uuid())
+  name           String
+  price          Float
+  durationMonths Int
+  active         Boolean  @default(true)
+  features       String[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  userSubscriptions UserSubscription[]
+}
+
+model UserSubscription {
+  id             String           @id @default(uuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id])
+  planId         String
+  plan           SubscriptionPlan @relation(fields: [planId], references: [id])
+  startDate      DateTime         @default(now())
+  endDate        DateTime
+  status         String           @default("ACTIVE") // ACTIVE, EXPIRED, CANCELLED
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model Transaction {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  amount        Float
+  currency      String   @default("BDT")
+  status        String   @default("PENDING") // SUCCESS, PENDING, FAILED
+  provider      String // bKash, Nagad, SSLCommerz, Stripe, etc.
+  transactionId String   @unique
+  purpose       String // SUBSCRIPTION, PAY_PER_EXAM
+  planId        String?
+  examId        String?
+  receiptUrl    String?
+  createdAt     DateTime @default(now())
+}
+
+model PaidExamAccess {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  examId    String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, examId])
+}
+
+model Coupon {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  discountType  String // PERCENTAGE, FIXED
+  discountValue Float
+  expiryDate    DateTime
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+}
+
+model SmsGatewayConfig {
+  id        String   @id @default(uuid())
+  provider  String   @default("BDAPPS") // BDAPPS, MOCK, TWILIO
+  costPerSms Float   @default(0.3)
+  senderId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GuardianLink {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id])
+  guardianMobile String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+// ==========================================
+// EXAM HISTORY & REPORTS
+// ==========================================
+
+model ExamHistory {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  topicId         String?
+  subjectId       String?
+  categoryName    String?
+  topicName       String?
+  totalQuestions  Int
+  correctAnswers  Int
+  wrongAnswers    Int
+  skippedAnswers  Int
+  score           Float
+  totalMarks      Float
+  percentage      Float
+  timeTakenSecs   Int
+  accuracy        Float
+  xpEarned        Int      @default(0)
+  coinsEarned     Int      @default(0)
+  negativeMarking Boolean  @default(false)
+  negativeValue   Float    @default(0.25)
+  difficulty      String?
+  language        String   @default("english")
+  aiFeedback      String?
+  weakAreas       String[] // topic names
+  strongAreas     String[] // topic names
+  topicBreakdown  Json     @default("{}")
+  isPremium       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+}
+
+// ==========================================
+// AUTO QUIZ CONFIGURATION
+// ==========================================
+
+model SubjectQuizConfig {
+  id              String   @id @default(uuid())
+  subjectName     String   @unique // "Mathematics", "Physics", etc.
+  defaultQuestions Int     @default(20)
+  defaultTimeMins  Int     @default(30)
+  defaultPassingPct Float  @default(40.0)
+  marksPerQuestion Float   @default(1.0)
+  negativeMarksDefault Float @default(0.25)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ==========================================
+// LEADERBOARD SNAPSHOTS
+// ==========================================
+
+model LeaderboardSnapshot {
+  id        String   @id @default(uuid())
+  userId    String
+  mobile    String
+  xp        Int
+  level     Int
+  period    String   // DAILY, WEEKLY, MONTHLY, ALL_TIME
+  subjectId String?
+  rank      Int?
+  createdAt DateTime @default(now())
+}
+
+// ==========================================
+// DAILY LOGIN REWARDS
+// ==========================================
+
+model DailyLoginReward {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  coinsGranted Int     @default(10)
+  xpGranted   Int      @default(5)
+  streakDay   Int      @default(1)
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, createdAt])
 }

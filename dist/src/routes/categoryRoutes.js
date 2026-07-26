@@ -1,0 +1,20 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const categoryController_1 = require("../controllers/categoryController");
+const authMiddleware_1 = require("../middleware/authMiddleware");
+const router = (0, express_1.Router)();
+router.get('/categories', categoryController_1.getCategories);
+router.post('/categories', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.createCategory);
+router.put('/categories/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.updateCategory);
+router.delete('/categories/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.deleteCategory);
+router.get('/subjects', categoryController_1.getSubjects);
+router.post('/subjects', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.createSubject);
+router.put('/subjects/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.updateSubject);
+router.delete('/subjects/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.deleteSubject);
+router.get('/topics', categoryController_1.getTopics);
+router.post('/topics', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.createTopic);
+router.put('/topics/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.updateTopic);
+router.delete('/topics/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.deleteTopic);
+exports.default = router;
+//# sourceMappingURL=categoryRoutes.js.map

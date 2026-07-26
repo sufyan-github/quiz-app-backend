@@ -34,7 +34,7 @@ export const lessonController = {
    */
   async getLesson(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       const lesson = await prisma.lesson.findUnique({
         where: { id },

@@ -1,0 +1,50 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
+const http_1 = __importDefault(require("http"));
+const realtimeService_1 = require("./services/realtimeService");
+const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
+const categoryRoutes_1 = __importDefault(require("./routes/categoryRoutes"));
+const questionRoutes_1 = __importDefault(require("./routes/questionRoutes"));
+const examRoutes_1 = __importDefault(require("./routes/examRoutes"));
+const userRoutes_1 = __importDefault(require("./routes/userRoutes"));
+const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
+const studentRoutes_1 = __importDefault(require("./routes/studentRoutes"));
+const bdappsRoutes_1 = __importDefault(require("./routes/bdappsRoutes"));
+const quizRoutes_1 = __importDefault(require("./routes/quizRoutes"));
+const aiRoutes_1 = __importDefault(require("./routes/aiRoutes"));
+const lessonRoutes_1 = __importDefault(require("./routes/lessonRoutes"));
+const paymentRoutes_1 = __importDefault(require("./routes/paymentRoutes"));
+const syncRoutes_1 = __importDefault(require("./routes/syncRoutes"));
+const app = (0, express_1.default)();
+const port = process.env.PORT || 4000;
+app.use((0, cors_1.default)());
+app.use(express_1.default.json());
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok' });
+});
+app.use('/api/auth', authRoutes_1.default);
+app.use('/api/users', userRoutes_1.default);
+app.use('/api/core', categoryRoutes_1.default);
+app.use('/api/questions', questionRoutes_1.default);
+app.use('/api/exams', examRoutes_1.default);
+app.use('/api/admin', adminRoutes_1.default);
+app.use('/api/student', studentRoutes_1.default);
+app.use('/api/bdapps', bdappsRoutes_1.default);
+app.use('/api/app', quizRoutes_1.default);
+app.use('/api/ai', aiRoutes_1.default);
+app.use('/api/lessons', lessonRoutes_1.default);
+app.use('/api/payment', paymentRoutes_1.default);
+app.use('/api/sync', syncRoutes_1.default);
+const server = http_1.default.createServer(app);
+// Initialize Socket.IO Realtime Service
+realtimeService_1.realtimeService.init(server);
+server.listen(port, () => {
+    console.log(`Server and Realtime Socket.IO running on port ${port}`);
+});
+exports.default = app;
+//# sourceMappingURL=app.js.map

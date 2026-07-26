@@ -10,7 +10,7 @@ export const updateProfile = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const { name, institution, department, semester, phone, avatarUrl } = req.body;
+    const { name, institution, department, semester, phone, avatarUrl, photo } = req.body;
 
     const profile = await prisma.profile.upsert({
       where: { userId },
@@ -20,7 +20,7 @@ export const updateProfile = async (req: AuthRequest, res: Response): Promise<vo
         department,
         semester,
         phone,
-        avatarUrl
+        photo: photo || avatarUrl
       },
       create: {
         userId,
@@ -29,7 +29,7 @@ export const updateProfile = async (req: AuthRequest, res: Response): Promise<vo
         department,
         semester,
         phone,
-        avatarUrl
+        photo: photo || avatarUrl
       }
     });
 
@@ -98,7 +98,7 @@ export const getAllUsers = async (req: AuthRequest, res: Response): Promise<void
 
 export const getUserDetails = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const user = await prisma.user.findUnique({
       where: { id },
       include: { 
@@ -122,7 +122,7 @@ export const getUserDetails = async (req: AuthRequest, res: Response): Promise<v
       email: user.email,
       role: user.role,
       profile: user.profile,
-      examAttempts: user.examAttempts,
+      examAttempts: user.attempts,
       createdAt: user.createdAt
     });
   } catch (error) {

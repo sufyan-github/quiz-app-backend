@@ -71,13 +71,31 @@ export const aiService = {
     return hint;
   },
 
-  async generateQuiz(topicId: string, adminId: string, difficulty?: string, count?: number) {
-    const topic = await prisma.topic.findUnique({ where: { id: topicId } });
+  async generateQuiz(topicId: string, adminId: string, difficulty?: string, count?: number, adminPrompt?: string, language?: string) {
+    const topic = await prisma.topic.findUnique({ 
+      where: { id: topicId },
+      include: {
+        subject: {
+          include: {
+            category: true
+          }
+        }
+      }
+    });
+
     if (!topic) {
       throw new Error('Topic not found');
     }
 
-    const prompt = `Generate ${count || 5} multiple choice questions about "${topic.name}" at a ${difficulty || 'MEDIUM'} difficulty.
+    const subjectName = topic.subject?.name || 'General';
+    const categoryName = topic.subject?.category?.name || 'General';
+    const targetLanguage = language || 'english';
+
+    let prompt = `Generate ${count || 5} multiple choice questions about the topic "${topic.name}" under the subject "${subjectName}" and category "${categoryName}" at a ${difficulty || 'MEDIUM'} difficulty.
+    Make sure the context is strictly relevant to the subject "${subjectName}" (e.g. if the subject is "Bangladesh Affairs" or "Bangladesh", questions must strictly focus on Bangladesh context rather than general global context).
+    
+    Language Requirement: The entire generated content (the question "text", the choice "text"s inside "options", and the "explanation") MUST be written strictly in the ${targetLanguage} language. E.g., if language is "bangla", write everything in Bangla (Bengali script).
+    
     Return the output as a raw JSON array of objects.
     Each object must have exactly this structure:
     {
@@ -90,6 +108,10 @@ export const aiService = {
         { "text": "option 4", "isCorrect": false }
       ]
     }`;
+
+    if (adminPrompt && adminPrompt.trim().length > 0) {
+      prompt += `\n\nExtra guidelines/directives provided by administrator: ${adminPrompt}`;
+    }
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',

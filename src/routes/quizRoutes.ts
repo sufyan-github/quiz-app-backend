@@ -4,10 +4,13 @@ import { authenticate } from '../middleware/authMiddleware';
 
 const router = Router();
 
-// Allow seeding without auth for testing
+// Seed without auth (testing only)
 router.get('/seed', quizController.seedData);
 
-// Require authentication for all quiz routes
+// Public
+router.get('/quiz-config', quizController.getQuizConfig);
+
+// Authenticated routes
 router.use(authenticate);
 
 router.get('/categories', quizController.getCategories);
@@ -15,5 +18,13 @@ router.get('/generate', quizController.generateQuiz);
 router.post('/submit', quizController.submitQuiz);
 router.get('/dashboard', quizController.getDashboard);
 router.get('/leaderboard', quizController.getLeaderboard);
+
+// Exam History
+router.get('/history', quizController.getExamHistory);
+router.get('/history/:id', quizController.getExamHistoryDetail);
+router.get('/history/:id/pdf', quizController.downloadPdfReport);
+
+// Daily Reward
+router.post('/daily-reward', quizController.claimDailyReward);
 
 export default router;
