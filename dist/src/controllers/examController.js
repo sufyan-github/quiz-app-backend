@@ -281,7 +281,7 @@ const addQuestionToExam = async (req, res) => {
                         isCorrect: opt.isCorrect || false
                     }))
                 },
-                exams: {
+                examQuestions: {
                     create: {
                         examId,
                         order: nextOrder
