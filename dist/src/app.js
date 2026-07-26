@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const http_1 = __importDefault(require("http"));
+const prisma_1 = require("./prisma");
 const realtimeService_1 = require("./services/realtimeService");
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const categoryRoutes_1 = __importDefault(require("./routes/categoryRoutes"));
@@ -24,9 +25,30 @@ const app = (0, express_1.default)();
 const port = process.env.PORT || 4000;
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
-app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok' });
+// 1. Root Endpoint (GET /)
+app.get('/', (req, res) => {
+    res.json({
+        status: "OK",
+        message: "Quiz AI Backend Running"
+    });
 });
+// 2. Health Check Endpoint (GET /api/health)
+app.get('/api/health', async (req, res) => {
+    let dbStatus = 'disconnected';
+    try {
+        await prisma_1.prisma.$queryRaw `SELECT 1`;
+        dbStatus = 'connected';
+    }
+    catch (err) {
+        dbStatus = `error: ${err?.message || 'DB connection failed'}`;
+    }
+    res.json({
+        success: true,
+        database: dbStatus,
+        server: "running"
+    });
+});
+// 3. Registered API Routes
 app.use('/api/auth', authRoutes_1.default);
 app.use('/api/users', userRoutes_1.default);
 app.use('/api/core', categoryRoutes_1.default);
@@ -44,7 +66,7 @@ const server = http_1.default.createServer(app);
 // Initialize Socket.IO Realtime Service
 realtimeService_1.realtimeService.init(server);
 server.listen(port, () => {
-    console.log(`Server and Realtime Socket.IO running on port ${port}`);
+    console.log(`[Server] Quiz AI Backend & Socket.IO running on port ${port}`);
 });
 exports.default = app;
 //# sourceMappingURL=app.js.map
