@@ -77,6 +77,12 @@ exports.deleteExam = deleteExam;
 const saveAnswer = async (req, res) => {
     try {
         const { attemptId, questionId, selectedOptionId, textAnswer } = req.body;
+        // Ownership check: a user may only write answers into their own attempt.
+        const attempt = await prisma_1.default.examAttempt.findUnique({ where: { id: attemptId } });
+        if (!attempt || attempt.studentId !== req.user?.userId) {
+            res.status(403).json({ error: 'Not your exam attempt' });
+            return;
+        }
         // Upsert the answer (if already answered, update it)
         const existing = await prisma_1.default.studentAnswer.findFirst({
             where: { attemptId, questionId }
@@ -119,6 +125,10 @@ const submitExam = async (req, res) => {
         });
         if (!attempt) {
             res.status(404).json({ error: 'Attempt not found' });
+            return;
+        }
+        if (attempt.studentId !== req.user?.userId) {
+            res.status(403).json({ error: 'Not your exam attempt' });
             return;
         }
         let totalScore = 0;
@@ -202,6 +212,10 @@ const generateCertificate = async (req, res) => {
         });
         if (!attempt || !attempt.result || attempt.result.grade === 'FAIL') {
             res.status(400).json({ error: 'Certificate not available or exam failed' });
+            return;
+        }
+        if (attempt.studentId !== req.user?.userId) {
+            res.status(403).json({ error: 'Not your certificate' });
             return;
         }
         const PDFDocument = require('pdfkit');

@@ -1,13 +1,4 @@
-import axios from 'axios';
-import { bdappsConfig } from '../config/bdapps';
-import { prisma } from '../prisma';
-
-export const WHITELISTED_NUMBERS = [
-  '01896283924',
-  '8801896283924',
-  '01812345678',
-  '8801812345678'
-];
+import { phpGatewayClient } from './phpGatewayClient';
 
 // In-memory rate limiting map for OTP requests: mobile -> timestamp[]
 const otpRateLimitMap = new Map<string, number[]>();
@@ -61,131 +52,53 @@ export const bdappsService = {
       };
     }
 
-    if (!bdappsConfig.appId || !bdappsConfig.password) {
-      console.error(`[BDApps Error] BDAPPS_APP_ID or BDAPPS_PASSWORD is not configured in environment variables.`);
+    try {
+      console.log(`[Proxy] Forwarding OTP Request for ${formattedSubId} to PHP Gateway`);
+      const response = await phpGatewayClient.post('/otp_request.php', {
+        subscriberId: formattedSubId
+      });
+
+      if (response?.statusCode === 'S1000' && response?.referenceNo) {
+        return {
+          success: true,
+          referenceNo: response.referenceNo,
+          statusCode: response.statusCode,
+          statusDetail: response.statusDetail || 'Success'
+        };
+      }
+
+      return {
+        success: false,
+        statusCode: response?.statusCode || 'E1000',
+        statusDetail: response?.statusDetail || 'Failed to request OTP via Gateway'
+      };
+
+    } catch (err: any) {
+      console.error(`[Proxy Error] OTP Request Failed:`, err.message);
+      
+      // Development Fallback Support
       if (process.env.NODE_ENV === 'development') {
-        console.log(`[BDAPPS DEV MODE] Returning dev reference for ${cleanDigits}. In production, configure BDAPPS credentials.`);
         return {
           success: true,
           referenceNo: `mock_ref_${cleanDigits}`,
           statusCode: 'S1000',
-          statusDetail: 'Success (Dev Mode Credentials Missing)'
+          statusDetail: 'Success (Dev Fallback - Gateway Error)'
         };
       }
+
       return {
         success: false,
-        statusCode: 'E1325',
-        statusDetail: 'BDApps application credentials missing'
+        statusCode: 'E1601',
+        statusDetail: `Gateway communication failure: ${err.message}`
       };
     }
-
-    const requestData = {
-      applicationId: bdappsConfig.appId,
-      password: bdappsConfig.password,
-      subscriberId: formattedSubId,
-      applicationHash: bdappsConfig.appHash || 'Quiz AI',
-      applicationMetaData: {
-        client: 'MOBILEAPP',
-        device: 'App',
-        os: 'android',
-        appCode: 'app_id'
-      }
-    };
-
-    // Structured Logging (Masking Password)
-    const maskedLogPayload = {
-      ...requestData,
-      password: '***HIDDEN***'
-    };
-    console.log(`[BDApps OTP Request] Sending POST https://developer.bdapps.com/subscription/otp/request`);
-    console.log(JSON.stringify(maskedLogPayload, null, 2));
-
-    let attempts = 0;
-    const maxAttempts = 2;
-
-    while (attempts < maxAttempts) {
-      attempts++;
-      try {
-        const response = await axios.post('https://developer.bdapps.com/subscription/otp/request', requestData, {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 10000
-        });
-
-        const data = response.data;
-        console.log(`[BDApps OTP Response] Status: ${response.status} | Data:`, JSON.stringify(data, null, 2));
-
-        if (data?.statusCode === 'S1000' && data?.referenceNo) {
-          console.log(`[BDApps OTP Success] Real SMS OTP requested for ${formattedSubId}. Ref: ${data.referenceNo}`);
-          return {
-            success: true,
-            referenceNo: data.referenceNo,
-            statusCode: data.statusCode,
-            statusDetail: data.statusDetail || 'Success'
-          };
-        }
-
-        // Handle specific BDApps status codes
-        const errorDetail = data?.statusDetail || 'Failed to request OTP';
-        console.warn(`[BDApps OTP Error] StatusCode: ${data?.statusCode} | StatusDetail: ${errorDetail}`);
-
-        if (data?.statusCode === 'E1360' || errorDetail.includes('allowed-host-address') || errorDetail.includes('IP address')) {
-          console.warn(`[BDApps Notice] BDApps Server IP Restriction triggered (Code E1360). Server IP is not whitelisted in BDApps Portal.`);
-          if (process.env.NODE_ENV === 'development') {
-            console.warn(`[BDApps Notice] Falling back to Dev reference for local testing.`);
-            return {
-              success: true,
-              referenceNo: `mock_ref_${cleanDigits}`,
-              statusCode: 'S1000',
-              statusDetail: 'Success (Dev Fallback - IP Not Whitelisted in BDApps Portal)'
-            };
-          }
-        }
-
-        return {
-          success: false,
-          statusCode: data?.statusCode || 'E1000',
-          statusDetail: errorDetail
-        };
-
-      } catch (err: any) {
-        console.error(`[BDApps OTP Attempt ${attempts} Failed] ${err.message}`);
-        if (attempts < maxAttempts) {
-          await new Promise(r => setTimeout(r, 1000));
-          continue;
-        }
-
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(`[BDApps Notice] Network error calling BDApps gateway (${err.message}). Returning Dev reference.`);
-          return {
-            success: true,
-            referenceNo: `mock_ref_${cleanDigits}`,
-            statusCode: 'S1000',
-            statusDetail: 'Success (Dev Fallback - Network Error)'
-          };
-        }
-
-        return {
-          success: false,
-          statusCode: 'E1601',
-          statusDetail: `Gateway communication failure: ${err.message}`
-        };
-      }
-    }
-
-    return {
-      success: false,
-      statusCode: 'E1601',
-      statusDetail: 'Service unavailable after retries'
-    };
   },
 
   async verifyOtp(referenceNo: string, otp: string) {
-    if (!bdappsConfig.appId || !bdappsConfig.password || referenceNo.startsWith('mock_ref_')) {
+    if (referenceNo.startsWith('mock_ref_')) {
       const cleanDigits = referenceNo.replace('mock_ref_', '') || '01896283924';
       if (process.env.NODE_ENV === 'development') {
-        // STRICT DEV MODE OTP CHECK: Only allow fixed dev OTP '123456' during offline local development
         if (otp === '123456') {
-          console.log(`[BDAPPS DEV VERIFY] Dev mode valid OTP code 123456 verified for reference ${referenceNo}.`);
           return {
             statusCode: 'S1000',
             statusDetail: 'Success (Dev Verified)',
@@ -193,51 +106,31 @@ export const bdappsService = {
             subscriptionStatus: 'REGISTERED'
           };
         } else {
-          console.warn(`[BDAPPS DEV VERIFY REJECT] Invalid dev OTP code '${otp}' entered for reference ${referenceNo}.`);
           return {
             statusCode: 'E1357',
             statusDetail: 'Invalid or wrong OTP code entered.'
           };
         }
       }
-      return {
-        statusCode: 'E1325',
-        statusDetail: 'Invalid reference or BDApps credentials missing'
-      };
     }
 
-    const requestData = {
-      applicationId: bdappsConfig.appId,
-      password: bdappsConfig.password,
-      referenceNo: referenceNo,
-      otp: otp
-    };
-
-    const maskedPayload = { ...requestData, password: '***HIDDEN***' };
-    console.log(`[BDApps Verify Request] Sending POST https://developer.bdapps.com/subscription/otp/verify`);
-    console.log(JSON.stringify(maskedPayload, null, 2));
-
     try {
-      const response = await axios.post('https://developer.bdapps.com/subscription/otp/verify', requestData, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 10000
+      console.log(`[Proxy] Forwarding OTP Verify for Ref ${referenceNo} to PHP Gateway`);
+      const response = await phpGatewayClient.post('/otp_verify.php', {
+        referenceNo,
+        otp
       });
 
-      const data = response.data;
-      console.log(`[BDApps Verify Response] Status: ${response.status} | Data:`, JSON.stringify(data, null, 2));
-
-      if (data?.statusCode === 'S1000') {
+      if (response?.statusCode === 'S1000') {
         return {
           statusCode: 'S1000',
-          statusDetail: data.statusDetail || 'Success',
-          subscriberId: data.subscriberId || `tel:8801896283924`,
-          subscriptionStatus: data.subscriptionStatus || 'REGISTERED'
+          statusDetail: response.statusDetail || 'Success',
+          subscriberId: response.subscriberId || `tel:8801896283924`,
+          subscriptionStatus: response.subscriptionStatus || 'REGISTERED'
         };
       }
 
-      console.warn(`[BDApps Verify Error] StatusCode: ${data?.statusCode} | Detail: ${data?.statusDetail}`);
-
-      if (data?.statusCode === 'E1357') {
+      if (response?.statusCode === 'E1357') {
         return {
           statusCode: 'E1357',
           statusDetail: 'Invalid or expired OTP code entered.'
@@ -245,15 +138,15 @@ export const bdappsService = {
       }
 
       return {
-        statusCode: data?.statusCode || 'FAILED',
-        statusDetail: data?.statusDetail || 'OTP verification failed'
+        statusCode: response?.statusCode || 'FAILED',
+        statusDetail: response?.statusDetail || 'OTP verification failed via Gateway'
       };
 
     } catch (err: any) {
-      console.error(`[BDApps Verify Exception] ${err.message}`);
+      console.error(`[Proxy Error] Verify Exception:`, err.message);
       return {
         statusCode: 'E1601',
-        statusDetail: `Network error during OTP verification: ${err.message}`
+        statusDetail: `Network error during Gateway OTP verification: ${err.message}`
       };
     }
   },
@@ -261,41 +154,32 @@ export const bdappsService = {
   async checkSubscription(subscriberId: string) {
     const formattedSubId = formatSubscriberId(subscriberId);
 
-    const requestData = {
-      applicationId: bdappsConfig.appId,
-      password: bdappsConfig.password,
-      subscriberId: formattedSubId
-    };
-
-    let response;
     try {
-      response = await axios.post('https://developer.bdapps.com/subscription/getStatus', requestData, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 10000
+      console.log(`[Proxy] Forwarding Subscription Check for ${formattedSubId} to PHP Gateway`);
+      const response = await phpGatewayClient.post('/status.php', {
+        subscriberId: formattedSubId
       });
-    } catch (err: any) {
-      try {
-        response = await axios.post('https://developer.bdapps.com/subscription/status', requestData, {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 10000
-        });
-      } catch (err2: any) {
-        return {
-          statusCode: 'S1000',
-          subscriptionStatus: 'REGISTERED'
-        };
+
+      // The PHP gateway automatically updates the DB during a status check,
+      // but if Render needs to double check, we could do it here too.
+      // We rely on PHP gateway updating the DB.
+
+      if (response?.statusCode) {
+        return response;
       }
+      return { statusCode: 'E1000', statusDetail: 'Gateway returned an unrecognized response' };
+    } catch (err: any) {
+      console.error(`[Proxy Error] Check Subscription Exception:`, err.message);
+      // Do NOT default to REGISTERED here: this must not silently grant
+      // premium access when the gateway is unreachable. Real access control
+      // reads `user.subscription_status` from the DB (authMiddleware.requirePremium),
+      // which this failure does not touch, so the caller must treat this as
+      // "status unknown" rather than "user is subscribed".
+      return {
+        statusCode: 'E1601',
+        statusDetail: `Gateway communication failure: ${err.message}`,
+        subscriptionStatus: 'UNKNOWN'
+      };
     }
-
-    const data = response.data;
-    if (data && data.statusCode === 'S1000') {
-      const mobile = String(formattedSubId).replace('tel:88', '0');
-      await prisma.user.updateMany({
-        where: { mobile },
-        data: { subscription_status: data.subscriptionStatus }
-      });
-    }
-
-    return data || { statusCode: 'S1000', subscriptionStatus: 'REGISTERED' };
   }
 };

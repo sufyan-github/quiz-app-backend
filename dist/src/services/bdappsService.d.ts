@@ -1,4 +1,3 @@
-export declare const WHITELISTED_NUMBERS: string[];
 export declare function extractMobileDigits(raw: string): string;
 export declare function formatSubscriberId(raw: string): string;
 export declare const bdappsService: {
@@ -13,17 +12,17 @@ export declare const bdappsService: {
         retryAfterSec: any;
         referenceNo?: undefined;
     } | {
-        retryAfterSec?: undefined;
         success: boolean;
         referenceNo: any;
         statusCode: any;
         statusDetail: any;
-    } | {
         retryAfterSec?: undefined;
-        referenceNo?: undefined;
+    } | {
         success: boolean;
         statusCode: any;
         statusDetail: any;
+        retryAfterSec?: undefined;
+        referenceNo?: undefined;
     }>;
     verifyOtp(referenceNo: string, otp: string): Promise<{
         statusCode: string;
@@ -31,10 +30,10 @@ export declare const bdappsService: {
         subscriberId: any;
         subscriptionStatus: any;
     } | {
-        subscriberId?: undefined;
-        subscriptionStatus?: undefined;
         statusCode: any;
         statusDetail: any;
+        subscriberId?: undefined;
+        subscriptionStatus?: undefined;
     }>;
     checkSubscription(subscriberId: string): Promise<any>;
 };

@@ -540,6 +540,13 @@ exports.quizController = {
         }
     },
     async seedData(req, res) {
+        // Testing-only route (see quizRoutes.ts), mounted with no auth at all.
+        // Must not run in production: it has no idempotency check, so every
+        // call inserts another duplicate Category/Subject/Topic/Question set.
+        if (process.env.NODE_ENV === 'production') {
+            res.status(404).json({ error: 'Not found' });
+            return;
+        }
         try {
             const category = await prisma_1.prisma.category.create({
                 data: { name: 'Programming', description: 'Test your coding skills' }

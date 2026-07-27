@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { AuthRequest } from '../middleware/authMiddleware';
 
 export const getExams = async (req: Request, res: Response) => {
   try {
@@ -77,10 +78,17 @@ export const deleteExam = async (req: Request, res: Response) => {
   }
 };
 
-export const saveAnswer = async (req: Request, res: Response) => {
+export const saveAnswer = async (req: AuthRequest, res: Response) => {
   try {
     const { attemptId, questionId, selectedOptionId, textAnswer } = req.body;
-    
+
+    // Ownership check: a user may only write answers into their own attempt.
+    const attempt = await prisma.examAttempt.findUnique({ where: { id: attemptId } });
+    if (!attempt || attempt.studentId !== req.user?.userId) {
+      res.status(403).json({ error: 'Not your exam attempt' });
+      return;
+    }
+
     // Upsert the answer (if already answered, update it)
     const existing = await prisma.studentAnswer.findFirst({
       where: { attemptId, questionId }
@@ -104,10 +112,10 @@ export const saveAnswer = async (req: Request, res: Response) => {
   }
 };
 
-export const submitExam = async (req: Request, res: Response): Promise<void> => {
+export const submitExam = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { attemptId } = req.body;
-    
+
     // Fetch attempt with answers and the actual exam questions/options
     const attempt = await prisma.examAttempt.findUnique({
       where: { id: attemptId },
@@ -122,12 +130,17 @@ export const submitExam = async (req: Request, res: Response): Promise<void> => 
         }
       }
     });
-    
+
     if (!attempt) {
       res.status(404).json({ error: 'Attempt not found' });
       return;
     }
-    
+
+    if (attempt.studentId !== req.user?.userId) {
+      res.status(403).json({ error: 'Not your exam attempt' });
+      return;
+    }
+
     let totalScore = 0;
     let correctCount = 0;
     let wrongCount = 0;
@@ -201,10 +214,10 @@ export const submitExam = async (req: Request, res: Response): Promise<void> => 
   }
 };
 
-export const generateCertificate = async (req: Request, res: Response): Promise<void> => {
+export const generateCertificate = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const attemptId = req.params.attemptId as string;
-    
+
     const attempt = await prisma.examAttempt.findUnique({
       where: { id: attemptId },
       include: {
@@ -216,6 +229,11 @@ export const generateCertificate = async (req: Request, res: Response): Promise<
 
     if (!attempt || !attempt.result || attempt.result.grade === 'FAIL') {
       res.status(400).json({ error: 'Certificate not available or exam failed' });
+      return;
+    }
+
+    if (attempt.studentId !== req.user?.userId) {
+      res.status(403).json({ error: 'Not your certificate' });
       return;
     }
 

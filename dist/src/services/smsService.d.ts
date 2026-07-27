@@ -4,21 +4,21 @@ export declare const smsService: {
      */
     getConfig(): Promise<{
         id: string;
+        createdAt: Date;
+        updatedAt: Date;
         provider: string;
         costPerSms: number;
         senderId: string | null;
-        createdAt: Date;
-        updatedAt: Date;
     }>;
     /**
      * Send SMS to a specific mobile number (Student or Guardian)
      */
     sendSms(mobile: string, message: string, userId?: string): Promise<{
+        message: string;
         id: string;
         mobile: string;
-        message: string;
-        status: string;
         createdAt: Date;
+        status: string;
     }>;
     /**
      * Send notification to user AND their linked guardian (if configured)

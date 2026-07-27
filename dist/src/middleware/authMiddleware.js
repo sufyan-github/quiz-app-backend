@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.requirePremium = exports.requireSuperAdmin = exports.requireAdmin = exports.authenticate = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const prisma_1 = require("../prisma");
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+const jwt_1 = require("../config/jwt");
 const app_1 = require("firebase-admin/app");
 const auth_1 = require("firebase-admin/auth");
 // Initialize firebase admin if not already initialized
@@ -36,7 +36,7 @@ const authenticate = async (req, res, next) => {
     catch (error) {
         // Fallback to JWT for legacy sessions or admin testing during migration
         try {
-            const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
+            const decoded = jsonwebtoken_1.default.verify(token, jwt_1.JWT_SECRET);
             req.user = decoded;
             next();
         }

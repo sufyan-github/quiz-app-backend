@@ -7,6 +7,7 @@ exports.bdappsController = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const prisma_1 = require("../prisma");
 const bdappsService_1 = require("../services/bdappsService");
+const jwt_1 = require("../config/jwt");
 exports.bdappsController = {
     async sendOtp(req, res) {
         try {
@@ -73,7 +74,7 @@ exports.bdappsController = {
                         data: { subscription_status: data.subscriptionStatus || 'REGISTERED' }
                     });
                 }
-                const token = jsonwebtoken_1.default.sign({ userId: user.id, mobile: user.mobile, role: user.role }, process.env.JWT_SECRET || 'fallback_secret_for_dev', { expiresIn: '7d' });
+                const token = jsonwebtoken_1.default.sign({ userId: user.id, mobile: user.mobile, role: user.role }, jwt_1.JWT_SECRET, { expiresIn: '7d' });
                 res.json({
                     statusCode: 'S1000',
                     statusDetail: data.statusDetail || 'Success',
@@ -110,24 +111,6 @@ exports.bdappsController = {
         catch (error) {
             console.error('Check Subscription Error:', error.message);
             res.status(500).json({ success: false, message: 'Server error' });
-        }
-    },
-    async handleNotification(req, res) {
-        try {
-            console.log('[BDApps Notification Webhook Received]', JSON.stringify(req.body, null, 2));
-            const { subscriberId, status } = req.body;
-            if (subscriberId) {
-                const mobile = subscriberId.replace('tel:88', '0');
-                await prisma_1.prisma.user.updateMany({
-                    where: { mobile },
-                    data: { subscription_status: status || 'REGISTERED' }
-                });
-            }
-            res.json({ statusCode: 'S1000', statusDetail: 'Success' });
-        }
-        catch (error) {
-            console.error('[BDApps Webhook Error]', error.message);
-            res.status(500).json({ statusCode: 'FAILED', message: 'Webhook processing error' });
         }
     }
 };

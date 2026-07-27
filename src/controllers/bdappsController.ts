@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../prisma';
 import { bdappsService } from '../services/bdappsService';
+import { JWT_SECRET } from '../config/jwt';
 
 export const bdappsController = {
   
@@ -80,7 +81,7 @@ export const bdappsController = {
         
         const token = jwt.sign(
           { userId: user.id, mobile: user.mobile, role: user.role },
-          process.env.JWT_SECRET || 'fallback_secret_for_dev',
+          JWT_SECRET,
           { expiresIn: '7d' }
         );
         
@@ -123,24 +124,6 @@ export const bdappsController = {
     } catch (error: any) {
       console.error('Check Subscription Error:', error.message);
       res.status(500).json({ success: false, message: 'Server error' });
-    }
-  },
-
-  async handleNotification(req: Request, res: Response): Promise<void> {
-    try {
-      console.log('[BDApps Notification Webhook Received]', JSON.stringify(req.body, null, 2));
-      const { subscriberId, status } = req.body;
-      if (subscriberId) {
-        const mobile = subscriberId.replace('tel:88', '0');
-        await prisma.user.updateMany({
-          where: { mobile },
-          data: { subscription_status: status || 'REGISTERED' }
-        });
-      }
-      res.json({ statusCode: 'S1000', statusDetail: 'Success' });
-    } catch (error: any) {
-      console.error('[BDApps Webhook Error]', error.message);
-      res.status(500).json({ statusCode: 'FAILED', message: 'Webhook processing error' });
     }
   }
 };

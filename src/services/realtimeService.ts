@@ -1,6 +1,7 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '../config/jwt';
 
 export interface ModuleVersion {
   version: number;
@@ -44,7 +45,7 @@ class RealtimeService {
       if (token) {
         try {
           const cleanToken = token.replace('Bearer ', '');
-          const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET || 'secret') as any;
+          const decoded = jwt.verify(cleanToken, JWT_SECRET) as any;
           (socket as any).userId = decoded.userId;
         } catch (err) {
           // Allow anonymous socket connections with public room

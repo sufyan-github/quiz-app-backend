@@ -52,7 +52,6 @@ app.get('/api/health', async (req, res) => {
 // 3. Registered API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/core', categoryRoutes);
 app.use('/api', categoryRoutes); // Mounts /api/categories, /api/subjects, /api/topics
 app.use('/api/questions', questionRoutes);
 app.use('/api/exams', examRoutes);

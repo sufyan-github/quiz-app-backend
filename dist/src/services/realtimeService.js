@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.realtimeService = void 0;
 const socket_io_1 = require("socket.io");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const jwt_1 = require("../config/jwt");
 class RealtimeService {
     io = null;
     moduleVersions = {
@@ -41,7 +42,7 @@ class RealtimeService {
             if (token) {
                 try {
                     const cleanToken = token.replace('Bearer ', '');
-                    const decoded = jsonwebtoken_1.default.verify(cleanToken, process.env.JWT_SECRET || 'secret');
+                    const decoded = jsonwebtoken_1.default.verify(cleanToken, jwt_1.JWT_SECRET);
                     socket.userId = decoded.userId;
                 }
                 catch (err) {

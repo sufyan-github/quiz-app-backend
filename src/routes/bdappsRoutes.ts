@@ -3,11 +3,13 @@ import { bdappsController } from '../controllers/bdappsController';
 
 const router = Router();
 
-// Endpoints mapping to BDApps API
+// Endpoints mapping to BDApps API (Proxy via PHP Gateway)
 router.post('/otp/send', bdappsController.sendOtp);
 router.post('/otp/verify', bdappsController.verifyOtp);
 router.post('/subscription/check', bdappsController.checkSubscription);
-router.post('/notification', bdappsController.handleNotification);
-router.post('/callback', bdappsController.handleNotification);
+
+// Note: /notification and /callback routes have been REMOVED from Render.
+// BDApps Production Webhooks must now be pointed to:
+// https://bdappsdigitalapps.com/api/callback.php
 
 export default router;

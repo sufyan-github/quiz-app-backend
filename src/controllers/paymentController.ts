@@ -95,8 +95,17 @@ export const paymentController = {
 
   /**
    * Callback receiver for payment webhook simulation.
+   * Dev/test only: this endpoint has no auth and no payment-provider
+   * signature verification, so it must never be reachable in production —
+   * doing so lets any user self-approve a real subscription for free.
+   * Replace with a real bKash/Nagad/Stripe webhook (verified signature)
+   * before removing this guard.
    */
   async simulateCallback(req: AuthRequest, res: Response): Promise<void> {
+    if (process.env.NODE_ENV === 'production') {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
     try {
       const { transactionId, status } = req.body;
 
