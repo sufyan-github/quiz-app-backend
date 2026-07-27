@@ -9,12 +9,14 @@ const crypto_1 = __importDefault(require("crypto"));
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
 const PHP_GATEWAY_URL = process.env.PHP_GATEWAY_URL || 'https://bdappsdigitalapps.com/api';
-const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY;
-if (!INTERNAL_API_KEY) {
-    throw new Error('INTERNAL_API_KEY environment variable is required to sign requests to the PHP gateway');
-}
 exports.phpGatewayClient = {
     async post(endpoint, data) {
+        // Checked lazily (per-call), not at module load: a missing key should
+        // only break BDApps calls, not crash the entire process on startup.
+        const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY;
+        if (!INTERNAL_API_KEY) {
+            throw new Error('INTERNAL_API_KEY environment variable is required to sign requests to the PHP gateway');
+        }
         const url = `${PHP_GATEWAY_URL}${endpoint}`;
         const payload = JSON.stringify(data);
         const timestamp = Math.floor(Date.now() / 1000).toString();
