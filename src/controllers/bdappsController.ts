@@ -29,16 +29,20 @@ export const bdappsController = {
       // an unregistered number, or a register attempt for an already-registered
       // one, should fail fast without ever calling out to BDApps.
       const existingUser = await prisma.user.findUnique({ where: { mobile: digits } });
+      console.log(`[OTP Send] mode=${mode} mobile=${digits} existingUser=${existingUser ? existingUser.id : 'none'}`);
       if (mode === 'login' && !existingUser) {
+        console.log(`[OTP Send] BLOCKED: login attempted for unregistered number ${digits}`);
         res.json({ success: false, statusCode: 'USER_NOT_FOUND', message: 'This mobile number is not registered. Please register first.' });
         return;
       }
       if (mode === 'register' && existingUser) {
+        console.log(`[OTP Send] BLOCKED: register attempted for already-registered number ${digits}`);
         res.json({ success: false, statusCode: 'USER_ALREADY_EXISTS', message: 'This number is already registered. Please log in.' });
         return;
       }
 
       const subscriberId = `tel:88${digits}`;
+      console.log(`[OTP Send] existence check passed, forwarding to BDApps gateway for ${subscriberId}`);
       const data = await bdappsService.sendOtp(subscriberId, digits);
 
       if (data.referenceNo) {
@@ -74,14 +78,18 @@ export const bdappsController = {
         return;
       }
 
+      console.log(`[OTP Verify] mode=${mode} referenceNo=${referenceNo}`);
       const data = await bdappsService.verifyOtp(referenceNo, Otp);
+      console.log(`[OTP Verify] BDApps gateway response statusCode=${data.statusCode}`);
 
       if (data.statusCode === 'S1000' && data.subscriberId) {
         const mobile = data.subscriberId.replace('tel:88', '0');
 
         let user = await prisma.user.findUnique({ where: { mobile } });
+        console.log(`[OTP Verify] mobile=${mobile} existingUser=${user ? user.id : 'none'}`);
 
         if (mode === 'login' && !user) {
+          console.log(`[OTP Verify] BLOCKED: login verify succeeded but no user record exists for ${mobile}`);
           // The send-otp existence check should have already caught this;
           // this is a safety net so a login attempt never silently creates
           // an account.
@@ -90,6 +98,7 @@ export const bdappsController = {
         }
 
         if (!user) {
+          console.log(`[OTP Verify] creating new user for ${mobile}`);
           user = await prisma.user.create({
             data: {
               mobile,
@@ -97,7 +106,9 @@ export const bdappsController = {
               subscription_status: data.subscriptionStatus || 'REGISTERED'
             }
           });
+          console.log(`[OTP Verify] user created id=${user.id}`);
         } else {
+          console.log(`[OTP Verify] updating existing user id=${user.id}`);
           user = await prisma.user.update({
             where: { id: user.id },
             data: { subscription_status: data.subscriptionStatus || 'REGISTERED' }
@@ -109,7 +120,8 @@ export const bdappsController = {
           JWT_SECRET,
           { expiresIn: '7d' }
         );
-        
+        console.log(`[OTP Verify] token generated, returning success for user id=${user.id}`);
+
         res.json({
           statusCode: 'S1000',
           statusDetail: data.statusDetail || 'Success',
