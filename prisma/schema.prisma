@@ -587,6 +587,18 @@ model ExamHistory {
 // AUTO QUIZ CONFIGURATION
 // ==========================================
 
+// ==========================================
+// LANDING PAGE REAL TRIAL - one per IP, ever
+// ==========================================
+
+// Persisted (not in-memory) so the one-time cap survives Render restarts
+// and works correctly if the backend is ever scaled to multiple instances.
+model TrialIpUsage {
+  id        String   @id @default(uuid())
+  ip        String   @unique
+  createdAt DateTime @default(now())
+}
+
 model SubjectQuizConfig {
   id              String   @id @default(uuid())
   subjectName     String   @unique // "Mathematics", "Physics", etc.

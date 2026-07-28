@@ -78,27 +78,9 @@ function isValidQuestionSet(data: any): data is DemoQuestion[] {
   );
 }
 
-// A second, separate rate limiter for trial-session issuance: each call
-// creates a real (throwaway) User row and unlocks the real free-tier caps
-// on /api/app/* and /api/ai/student-generate, so it needs its own budget
-// distinct from generateDemoQuiz's per-topic cache/limit above.
-const TRIAL_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const TRIAL_RATE_LIMIT_MAX = 5; // trial sessions per IP per hour
-const trialIpLog = new Map<string, number[]>();
-
-function checkTrialRateLimit(ip: string): { allowed: boolean; retryAfterSec?: number } {
-  const now = Date.now();
-  const timestamps = (trialIpLog.get(ip) || []).filter(t => now - t < TRIAL_RATE_LIMIT_WINDOW_MS);
-
-  if (timestamps.length >= TRIAL_RATE_LIMIT_MAX) {
-    const retryAfterSec = Math.ceil((TRIAL_RATE_LIMIT_WINDOW_MS - (now - timestamps[0])) / 1000);
-    return { allowed: false, retryAfterSec };
-  }
-
-  timestamps.push(now);
-  trialIpLog.set(ip, timestamps);
-  return { allowed: true };
-}
+// One trial per IP, ever - not a rolling window. This has to be durable
+// (DB row, not an in-memory Map) because Render restarts the process on
+// every deploy/idle-wake, which would silently reset an in-memory cap.
 
 export const demoController = {
   async generateDemoQuiz(req: Request, res: Response): Promise<void> {
@@ -200,15 +182,27 @@ Respond with ONLY a raw JSON array (no markdown fences) of exactly 5 objects, ea
   // email domain for later cleanup/exclusion from admin analytics.
   async startTrialSession(req: Request, res: Response): Promise<void> {
     try {
-      const ip = req.ip || 'unknown';
-      const rateCheck = checkTrialRateLimit(ip);
-      if (!rateCheck.allowed) {
-        res.status(429).json({
-          success: false,
-          message: 'Too many trial requests. Please try again later.',
-          retryAfterSec: rateCheck.retryAfterSec,
-        });
+      const ip = req.ip;
+      if (!ip) {
+        res.status(500).json({ success: false, message: 'Could not determine client IP' });
         return;
+      }
+
+      // TrialIpUsage.ip is @unique, so this create() is the atomic
+      // check-and-claim: concurrent requests from the same IP can't both
+      // slip through the way a separate find-then-create would allow.
+      try {
+        await prisma.trialIpUsage.create({ data: { ip } });
+      } catch (err: any) {
+        if (err.code === 'P2002') {
+          res.status(403).json({
+            success: false,
+            alreadyUsed: true,
+            message: 'The free trial has already been used from this network. Subscribe to keep playing.',
+          });
+          return;
+        }
+        throw err;
       }
 
       const trialId = `trial_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
