@@ -83,7 +83,11 @@ export const bdappsController = {
       console.log(`[OTP Verify] BDApps gateway response statusCode=${data.statusCode}`);
 
       if (data.statusCode === 'S1000' && data.subscriberId) {
-        const mobile = data.subscriberId.replace('tel:88', '0');
+        // .replace('tel:88', '0') substitutes the prefix instead of removing
+        // it, which corrupts the number with an extra leading zero (since
+        // the digits after tel:88 already start with 0). Strip the prefix
+        // entirely instead.
+        const mobile = data.subscriberId.replace(/^tel:88/, '');
 
         let user = await prisma.user.findUnique({ where: { mobile } });
         console.log(`[OTP Verify] mobile=${mobile} existingUser=${user ? user.id : 'none'}`);
