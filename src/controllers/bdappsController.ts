@@ -9,6 +9,9 @@ export const bdappsController = {
   async sendOtp(req: Request, res: Response): Promise<void> {
     try {
       const rawMobile = req.body.user_mobile || req.body.phoneNumber || req.body.mobile || '';
+      // 'register' is the default so existing callers that don't pass a mode
+      // keep today's create-or-login-transparently behavior.
+      const mode = req.body.mode === 'login' ? 'login' : 'register';
       let digits = rawMobile.replace(/\D+/g, '');
 
       if (digits.startsWith('880') && digits.length === 13) {
@@ -19,6 +22,19 @@ export const bdappsController = {
 
       if (!/^01[3-9][0-9]{8}$/.test(digits)) {
         res.status(400).json({ success: false, message: 'Invalid mobile number format. Must be an 11-digit BD mobile number (e.g., 01896283924).' });
+        return;
+      }
+
+      // Check existence before spending a real OTP send: a login attempt for
+      // an unregistered number, or a register attempt for an already-registered
+      // one, should fail fast without ever calling out to BDApps.
+      const existingUser = await prisma.user.findUnique({ where: { mobile: digits } });
+      if (mode === 'login' && !existingUser) {
+        res.json({ success: false, statusCode: 'USER_NOT_FOUND', message: 'This mobile number is not registered. Please register first.' });
+        return;
+      }
+      if (mode === 'register' && existingUser) {
+        res.json({ success: false, statusCode: 'USER_ALREADY_EXISTS', message: 'This number is already registered. Please log in.' });
         return;
       }
 
@@ -51,6 +67,7 @@ export const bdappsController = {
     try {
       const Otp = req.body.Otp || req.body.otp || req.body.code;
       const referenceNo = req.body.referenceNo || req.body.ref;
+      const mode = req.body.mode === 'login' ? 'login' : 'register';
 
       if (!Otp || !referenceNo) {
         res.status(400).json({ statusCode: 'FAILED', message: 'Missing OTP code or referenceNo' });
@@ -58,12 +75,20 @@ export const bdappsController = {
       }
 
       const data = await bdappsService.verifyOtp(referenceNo, Otp);
-      
+
       if (data.statusCode === 'S1000' && data.subscriberId) {
         const mobile = data.subscriberId.replace('tel:88', '0');
-        
+
         let user = await prisma.user.findUnique({ where: { mobile } });
-        
+
+        if (mode === 'login' && !user) {
+          // The send-otp existence check should have already caught this;
+          // this is a safety net so a login attempt never silently creates
+          // an account.
+          res.json({ statusCode: 'USER_NOT_FOUND', message: 'This mobile number is not registered. Please register first.' });
+          return;
+        }
+
         if (!user) {
           user = await prisma.user.create({
             data: {
@@ -78,7 +103,7 @@ export const bdappsController = {
             data: { subscription_status: data.subscriptionStatus || 'REGISTERED' }
           });
         }
-        
+
         const token = jwt.sign(
           { userId: user.id, mobile: user.mobile, role: user.role },
           JWT_SECRET,
