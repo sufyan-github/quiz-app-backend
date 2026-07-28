@@ -100,10 +100,15 @@ exports.bdappsController = {
                         data: {
                             mobile,
                             email: `${mobile}@example.com`,
-                            subscription_status: data.subscriptionStatus || 'REGISTERED'
+                            subscription_status: data.subscriptionStatus || 'REGISTERED',
+                            // authController.register (email/password signup) creates a
+                            // Profile too; BDApps-registered users were missing one.
+                            profile: {
+                                create: { name: `User ${mobile}` }
+                            }
                         }
                     });
-                    console.log(`[OTP Verify] user created id=${user.id}`);
+                    console.log(`[OTP Verify] user created id=${user.id} with profile`);
                 }
                 else {
                     console.log(`[OTP Verify] updating existing user id=${user.id}`);
