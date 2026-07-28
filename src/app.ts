@@ -17,9 +17,15 @@ import aiRoutes from './routes/aiRoutes';
 import lessonRoutes from './routes/lessonRoutes';
 import paymentRoutes from './routes/paymentRoutes';
 import syncRoutes from './routes/syncRoutes';
+import demoRoutes from './routes/demoRoutes';
 
 const app = express();
 const port = process.env.PORT || 4000;
+
+// Render sits behind a reverse proxy; without this, req.ip resolves to the
+// proxy's address for every request, which would make demoController's
+// per-IP rate limiting a no-op.
+app.set('trust proxy', 1);
 
 app.use(cors());
 app.use(express.json());
@@ -63,6 +69,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/lessons', lessonRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/demo', demoRoutes);
 
 const server = http.createServer(app);
 

@@ -21,8 +21,13 @@ const aiRoutes_1 = __importDefault(require("./routes/aiRoutes"));
 const lessonRoutes_1 = __importDefault(require("./routes/lessonRoutes"));
 const paymentRoutes_1 = __importDefault(require("./routes/paymentRoutes"));
 const syncRoutes_1 = __importDefault(require("./routes/syncRoutes"));
+const demoRoutes_1 = __importDefault(require("./routes/demoRoutes"));
 const app = (0, express_1.default)();
 const port = process.env.PORT || 4000;
+// Render sits behind a reverse proxy; without this, req.ip resolves to the
+// proxy's address for every request, which would make demoController's
+// per-IP rate limiting a no-op.
+app.set('trust proxy', 1);
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 // 1. Root Endpoint (GET /)
@@ -62,6 +67,7 @@ app.use('/api/ai', aiRoutes_1.default);
 app.use('/api/lessons', lessonRoutes_1.default);
 app.use('/api/payment', paymentRoutes_1.default);
 app.use('/api/sync', syncRoutes_1.default);
+app.use('/api/demo', demoRoutes_1.default);
 const server = http_1.default.createServer(app);
 // Initialize Socket.IO Realtime Service
 realtimeService_1.realtimeService.init(server);
