@@ -207,6 +207,12 @@ export const getAdminRevenue = async (req: AuthRequest, res: Response): Promise<
     });
     const totalRevenue = successfulTxns.reduce((sum, t) => sum + t.amount, 0);
 
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayRevenue = successfulTxns
+      .filter(t => t.createdAt >= todayStart)
+      .reduce((sum, t) => sum + t.amount, 0);
+
     // SMS log counting & Cost calculations
     const smsCount = await prisma.smsLog.count();
     let smsConfig = await prisma.smsGatewayConfig.findFirst();
@@ -250,6 +256,7 @@ export const getAdminRevenue = async (req: AuthRequest, res: Response): Promise<
     res.json({
       summary: {
         totalRevenue,
+        todayRevenue,
         smsCount,
         smsExpenditure,
         activePremiumCount,
@@ -497,6 +504,18 @@ export const getAdminSubscriptionAnalytics = async (req: AuthRequest, res: Respo
       _count: { _all: true },
     });
 
+    const couponUsageRaw = await prisma.transaction.groupBy({
+      by: ['couponCode'],
+      where: { couponCode: { not: null } },
+      _count: { _all: true },
+      _sum: { amount: true },
+    });
+    const couponUsage = couponUsageRaw.map(c => ({
+      code: c.couponCode,
+      uses: c._count._all,
+      totalAmount: c._sum.amount ?? 0,
+    }));
+
     res.json({
       success: true,
       data: {
@@ -504,6 +523,7 @@ export const getAdminSubscriptionAnalytics = async (req: AuthRequest, res: Respo
         genericPlans: { active: activePlanCount, expired: expiredPlanCount, cancelled: cancelledPlanCount },
         sevenDayRetentionPct,
         operatorBreakdown,
+        couponUsage,
       },
     });
   } catch (error: any) {

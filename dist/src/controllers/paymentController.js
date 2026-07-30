@@ -72,6 +72,7 @@ exports.paymentController = {
                     purpose,
                     planId: purpose === 'SUBSCRIPTION' ? planId : null,
                     examId: purpose === 'PAY_PER_EXAM' ? examId : null,
+                    couponCode: couponCode || null,
                     status: 'PENDING'
                 }
             });

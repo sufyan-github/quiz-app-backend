@@ -547,12 +547,14 @@ model Transaction {
   purpose       String // SUBSCRIPTION, PAY_PER_EXAM
   planId        String?
   examId        String?
+  couponCode    String? // set when a Coupon was applied at checkout - enables real coupon-usage reporting
   receiptUrl    String?
   createdAt     DateTime @default(now())
 
   @@index([userId])
   @@index([status])
   @@index([provider])
+  @@index([couponCode])
 }
 
 model PaidExamAccess {
