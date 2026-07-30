@@ -389,3 +389,125 @@ export const updateAdminSmsConfig = async (req: AuthRequest, res: Response): Pro
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// ==========================================
+// SUBSCRIPTION MANAGEMENT (BDApps + generic plans)
+// ==========================================
+
+export const getAdminSubscriptions = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '20'), 10)));
+    const search = String(req.query.search || '').trim();
+    const statusFilter = String(req.query.status || '').trim();
+
+    const where: any = {};
+    if (search) {
+      where.OR = [
+        { mobile: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    if (statusFilter) {
+      where.subscription_status = statusFilter;
+    }
+
+    const [total, users] = await Promise.all([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true,
+          mobile: true,
+          email: true,
+          subscription_status: true,
+          updatedAt: true,
+          profile: { select: { name: true } },
+          subscriptions: { orderBy: { updated_at: 'desc' }, take: 1 },
+          userSubscriptions: { orderBy: { createdAt: 'desc' }, take: 1, include: { plan: true } },
+        },
+      }),
+    ]);
+
+    res.json({
+      success: true,
+      data: users,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+export const getAdminPaymentLogs = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '30'), 10)));
+
+    const [total, transactions, webhookLogs] = await Promise.all([
+      prisma.transaction.count(),
+      prisma.transaction.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { user: { include: { profile: true } } },
+      }),
+      prisma.webhookLog.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }),
+    ]);
+
+    res.json({
+      success: true,
+      data: { transactions, webhookLogs },
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+export const getAdminSubscriptionAnalytics = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const [registeredCount, unsubscribedCount, activePlanCount, expiredPlanCount, cancelledPlanCount] = await Promise.all([
+      prisma.user.count({ where: { subscription_status: 'REGISTERED' } }),
+      prisma.user.count({ where: { subscription_status: 'UNSUBSCRIBED' } }),
+      prisma.userSubscription.count({ where: { status: 'ACTIVE' } }),
+      prisma.userSubscription.count({ where: { status: 'EXPIRED' } }),
+      prisma.userSubscription.count({ where: { status: 'CANCELLED' } }),
+    ]);
+
+    // "Renewal rate" doesn't map onto continuous telco direct-carrier
+    // billing - there's no discrete renewal event to count, Robi/Airtel
+    // just keeps billing daily until the subscriber unsubscribes. Report a
+    // 7-day retention proxy instead: of subscriptions that started 7+ days
+    // ago, what fraction are still REGISTERED today.
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [cohort, stillActive] = await Promise.all([
+      prisma.subscription.count({ where: { created_at: { lte: sevenDaysAgo } } }),
+      prisma.subscription.count({ where: { created_at: { lte: sevenDaysAgo }, status: 'REGISTERED' } }),
+    ]);
+    const sevenDayRetentionPct = cohort > 0 ? Math.round((stillActive / cohort) * 1000) / 10 : null;
+
+    const operatorBreakdown = await prisma.subscription.groupBy({
+      by: ['operator'],
+      _count: { _all: true },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        bdapps: { registered: registeredCount, unsubscribed: unsubscribedCount },
+        genericPlans: { active: activePlanCount, expired: expiredPlanCount, cancelled: cancelledPlanCount },
+        sevenDayRetentionPct,
+        operatorBreakdown,
+      },
+    });
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};

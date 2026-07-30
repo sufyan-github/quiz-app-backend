@@ -15,4 +15,7 @@ export declare const getAdminCoupons: (req: AuthRequest, res: Response) => Promi
 export declare const createAdminCoupon: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const getAdminSmsConfig: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const updateAdminSmsConfig: (req: AuthRequest, res: Response) => Promise<void>;
+export declare const getAdminSubscriptions: (req: AuthRequest, res: Response) => Promise<void>;
+export declare const getAdminPaymentLogs: (req: AuthRequest, res: Response) => Promise<void>;
+export declare const getAdminSubscriptionAnalytics: (req: AuthRequest, res: Response) => Promise<void>;
 //# sourceMappingURL=adminController.d.ts.map

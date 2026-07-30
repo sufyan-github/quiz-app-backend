@@ -21,6 +21,9 @@ router.get('/coupons', adminController_1.getAdminCoupons);
 router.post('/coupons', adminController_1.createAdminCoupon);
 router.get('/sms-config', adminController_1.getAdminSmsConfig);
 router.put('/sms-config', adminController_1.updateAdminSmsConfig);
+router.get('/subscriptions', adminController_1.getAdminSubscriptions);
+router.get('/payment-logs', adminController_1.getAdminPaymentLogs);
+router.get('/subscription-analytics', adminController_1.getAdminSubscriptionAnalytics);
 // User & Role Management
 router.get('/users', adminController_1.getAdminUsers);
 router.put('/users/:id/role', authMiddleware_1.requireSuperAdmin, adminController_1.updateUserRole);

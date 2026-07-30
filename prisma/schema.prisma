@@ -368,14 +368,46 @@ model UserAchievement {
   @@unique([userId, achievementId])
 }
 
+// The single real source of truth for a user's BDApps telco (Robi/Airtel)
+// direct-carrier-billing subscription state. Written only by
+// bdappsController.verifyOtp (initial subscribe) and the BDApps webhook
+// handler (subscriptionController.handleWebhook) - never by the client.
 model Subscription {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   subscriber_id String
-  user          User     @relation(fields: [subscriber_id], references: [id])
-  status        String   @default("REGISTERED") // REGISTERED, UNSUBSCRIBED
+  user          User      @relation(fields: [subscriber_id], references: [id])
+  status        String    @default("REGISTERED") // REGISTERED, UNSUBSCRIBED
+  operator      String? // ROBI, AIRTEL - unknown for older rows
+  referenceNo   String? // BDApps-issued reference from otp/verify or getStatus
   frequency     String?
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  lastCheckedAt DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  @@index([subscriber_id])
+  @@index([status])
+}
+
+// Durable audit trail of every inbound BDApps webhook delivery. Exists to
+// make replay/duplicate-delivery detection possible (idempotencyKey is
+// unique) and to give the admin dashboard a real "Webhook Logs" table -
+// previously this only existed as PHP-side text-file logging, invisible
+// to the Node backend and the admin dashboard entirely.
+model WebhookLog {
+  id              String   @id @default(uuid())
+  source          String   @default("BDAPPS")
+  subscriberId    String?
+  mobile          String?
+  rawPayload      Json
+  receivedStatus  String?
+  signatureValid  Boolean  @default(false)
+  processed       Boolean  @default(false)
+  processingNote  String?
+  idempotencyKey  String   @unique
+  createdAt       DateTime @default(now())
+
+  @@index([mobile])
+  @@index([createdAt])
 }
 
 model SmsLog {
@@ -492,8 +524,17 @@ model UserSubscription {
   status         String           @default("ACTIVE") // ACTIVE, EXPIRED, CANCELLED
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+
+  @@index([userId])
+  @@index([status])
 }
 
+// Doubles as the subscription transaction ledger: every real
+// subscription-state-change event (BDApps otp/verify, BDApps webhook,
+// or a completed generic checkout) writes one row here. provider='BDAPPS'
+// rows are the real Robi/Airtel subscription events; other providers are
+// the separate, not-yet-integrated generic checkout path in
+// paymentController.ts (unchanged by this work).
 model Transaction {
   id            String   @id @default(uuid())
   userId        String
@@ -501,13 +542,17 @@ model Transaction {
   amount        Float
   currency      String   @default("BDT")
   status        String   @default("PENDING") // SUCCESS, PENDING, FAILED
-  provider      String // bKash, Nagad, SSLCommerz, Stripe, etc.
+  provider      String // BDAPPS, bKash, Nagad, SSLCommerz, Stripe, etc.
   transactionId String   @unique
   purpose       String // SUBSCRIPTION, PAY_PER_EXAM
   planId        String?
   examId        String?
   receiptUrl    String?
   createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@index([provider])
 }
 
 model PaidExamAccess {

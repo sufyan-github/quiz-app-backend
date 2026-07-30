@@ -7,6 +7,7 @@ exports.bdappsController = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const prisma_1 = require("../prisma");
 const bdappsService_1 = require("../services/bdappsService");
+const subscriptionSync_1 = require("../services/subscriptionSync");
 const jwt_1 = require("../config/jwt");
 exports.bdappsController = {
     async sendOtp(req, res) {
@@ -94,13 +95,14 @@ exports.bdappsController = {
                     res.json({ statusCode: 'USER_NOT_FOUND', message: 'This mobile number is not registered. Please register first.' });
                     return;
                 }
+                const subscriptionStatus = data.subscriptionStatus || 'REGISTERED';
                 if (!user) {
                     console.log(`[OTP Verify] creating new user for ${mobile}`);
                     user = await prisma_1.prisma.user.create({
                         data: {
                             mobile,
                             email: `${mobile}@example.com`,
-                            subscription_status: data.subscriptionStatus || 'REGISTERED',
+                            subscription_status: subscriptionStatus,
                             // authController.register (email/password signup) creates a
                             // Profile too; BDApps-registered users were missing one.
                             profile: {
@@ -112,18 +114,25 @@ exports.bdappsController = {
                 }
                 else {
                     console.log(`[OTP Verify] updating existing user id=${user.id}`);
-                    user = await prisma_1.prisma.user.update({
-                        where: { id: user.id },
-                        data: { subscription_status: data.subscriptionStatus || 'REGISTERED' }
-                    });
                 }
+                // Single real write path for BDApps subscription state - also
+                // upserts the Subscription row and logs a Transaction on a genuine
+                // new activation, so this is no longer just a bare string flip on
+                // User. See subscriptionSync.ts.
+                await (0, subscriptionSync_1.syncBdappsSubscription)({
+                    userId: user.id,
+                    status: subscriptionStatus,
+                    referenceNo,
+                    source: 'OTP_VERIFY',
+                });
+                user = await prisma_1.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
                 const token = jsonwebtoken_1.default.sign({ userId: user.id, mobile: user.mobile, role: user.role }, jwt_1.JWT_SECRET, { expiresIn: '7d' });
                 console.log(`[OTP Verify] token generated, returning success for user id=${user.id}`);
                 res.json({
                     statusCode: 'S1000',
                     statusDetail: data.statusDetail || 'Success',
                     subscriberId: data.subscriberId,
-                    subscriptionStatus: data.subscriptionStatus || 'REGISTERED',
+                    subscriptionStatus,
                     token: token,
                     user: {
                         id: user.id,
@@ -144,12 +153,25 @@ exports.bdappsController = {
     },
     async checkSubscription(req, res) {
         try {
-            const subscriberId = req.body.subscriberId || req.query.subscriberId;
+            const subscriberId = (req.body.subscriberId || req.query.subscriberId);
             if (!subscriberId) {
                 res.status(400).json({ success: false, message: 'subscriberId required' });
                 return;
             }
             const data = await bdappsService_1.bdappsService.checkSubscription(subscriberId);
+            // The PHP gateway no longer writes subscription state directly to
+            // the database (see status.php) - this is now the only write path
+            // for a status check, same as syncBdappsSubscription's other two
+            // callers (OTP verify, the webhook). Mirrors status.php's old
+            // fallback: S1000 with no explicit subscriptionStatus means REGISTERED.
+            if (data?.statusCode === 'S1000') {
+                const status = data.subscriptionStatus || 'REGISTERED';
+                const mobile = String(subscriberId).replace(/^tel:88/, '');
+                const user = await prisma_1.prisma.user.findUnique({ where: { mobile } });
+                if (user) {
+                    await (0, subscriptionSync_1.syncBdappsSubscription)({ userId: user.id, status, referenceNo: null, source: 'MANUAL_CHECK' });
+                }
+            }
             res.json(data);
         }
         catch (error) {

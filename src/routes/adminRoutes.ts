@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAdminProfile, updateAdminProfile, getAdminDashboard, getAdminActivityLogs, getAdminUsers, updateUserRole, createAdminUser, getAdminRevenue, getAdminPlans, createAdminPlan, deleteAdminPlan, getAdminCoupons, createAdminCoupon, getAdminSmsConfig, updateAdminSmsConfig } from '../controllers/adminController';
+import { getAdminProfile, updateAdminProfile, getAdminDashboard, getAdminActivityLogs, getAdminUsers, updateUserRole, createAdminUser, getAdminRevenue, getAdminPlans, createAdminPlan, deleteAdminPlan, getAdminCoupons, createAdminCoupon, getAdminSmsConfig, updateAdminSmsConfig, getAdminSubscriptions, getAdminPaymentLogs, getAdminSubscriptionAnalytics } from '../controllers/adminController';
 import { sendNotification, getNotifications } from '../controllers/notificationController';
 import { getPromptTemplates, updatePromptTemplate } from '../controllers/promptController';
 import { authenticate, requireAdmin, requireSuperAdmin } from '../middleware/authMiddleware';
@@ -23,6 +23,9 @@ router.get('/coupons', getAdminCoupons);
 router.post('/coupons', createAdminCoupon);
 router.get('/sms-config', getAdminSmsConfig);
 router.put('/sms-config', updateAdminSmsConfig);
+router.get('/subscriptions', getAdminSubscriptions);
+router.get('/payment-logs', getAdminPaymentLogs);
+router.get('/subscription-analytics', getAdminSubscriptionAnalytics);
 
 // User & Role Management
 router.get('/users', getAdminUsers);

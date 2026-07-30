@@ -22,6 +22,7 @@ const lessonRoutes_1 = __importDefault(require("./routes/lessonRoutes"));
 const paymentRoutes_1 = __importDefault(require("./routes/paymentRoutes"));
 const syncRoutes_1 = __importDefault(require("./routes/syncRoutes"));
 const demoRoutes_1 = __importDefault(require("./routes/demoRoutes"));
+const subscriptionRoutes_1 = __importDefault(require("./routes/subscriptionRoutes"));
 const app = (0, express_1.default)();
 const port = process.env.PORT || 4000;
 // Render sits behind a reverse proxy; without this, req.ip resolves to the
@@ -29,7 +30,13 @@ const port = process.env.PORT || 4000;
 // per-IP rate limiting a no-op.
 app.set('trust proxy', 1);
 app.use((0, cors_1.default)());
-app.use(express_1.default.json());
+// Captures the exact raw bytes alongside Express's normal parsed body.
+// verifyPhpWebhookSignature.ts needs the untouched bytes (not a
+// re-serialized JSON.stringify(req.body), which can silently differ from
+// what the sender actually signed - different key order, number
+// formatting, etc.) to check an HMAC signature correctly. This doesn't
+// change parsing behavior for any existing route.
+app.use(express_1.default.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 // 1. Root Endpoint (GET /)
 app.get('/', (req, res) => {
     res.json({
@@ -68,6 +75,7 @@ app.use('/api/lessons', lessonRoutes_1.default);
 app.use('/api/payment', paymentRoutes_1.default);
 app.use('/api/sync', syncRoutes_1.default);
 app.use('/api/demo', demoRoutes_1.default);
+app.use('/api/subscription', subscriptionRoutes_1.default);
 const server = http_1.default.createServer(app);
 // Initialize Socket.IO Realtime Service
 realtimeService_1.realtimeService.init(server);

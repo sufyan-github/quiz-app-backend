@@ -18,6 +18,7 @@ import lessonRoutes from './routes/lessonRoutes';
 import paymentRoutes from './routes/paymentRoutes';
 import syncRoutes from './routes/syncRoutes';
 import demoRoutes from './routes/demoRoutes';
+import subscriptionRoutes from './routes/subscriptionRoutes';
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -28,7 +29,13 @@ const port = process.env.PORT || 4000;
 app.set('trust proxy', 1);
 
 app.use(cors());
-app.use(express.json());
+// Captures the exact raw bytes alongside Express's normal parsed body.
+// verifyPhpWebhookSignature.ts needs the untouched bytes (not a
+// re-serialized JSON.stringify(req.body), which can silently differ from
+// what the sender actually signed - different key order, number
+// formatting, etc.) to check an HMAC signature correctly. This doesn't
+// change parsing behavior for any existing route.
+app.use(express.json({ verify: (req: any, _res, buf) => { req.rawBody = buf; } }));
 
 // 1. Root Endpoint (GET /)
 app.get('/', (req, res) => {
@@ -70,6 +77,7 @@ app.use('/api/lessons', lessonRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/demo', demoRoutes);
+app.use('/api/subscription', subscriptionRoutes);
 
 const server = http.createServer(app);
 
