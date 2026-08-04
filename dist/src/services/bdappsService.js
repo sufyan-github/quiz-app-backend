@@ -169,4 +169,3 @@ exports.bdappsService = {
         }
     }
 };
-//# sourceMappingURL=bdappsService.js.map

@@ -9,9 +9,11 @@ const pg_1 = require("pg");
 const adapter_pg_1 = require("@prisma/adapter-pg");
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
-const connectionString = process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/quizmaster?schema=public";
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+    throw new Error('DATABASE_URL environment variable is required');
+}
 const pool = new pg_1.Pool({ connectionString });
 const adapter = new adapter_pg_1.PrismaPg(pool);
 exports.prisma = new client_1.PrismaClient({ adapter });
 exports.default = exports.prisma;
-//# sourceMappingURL=index.js.map

@@ -7,5 +7,6 @@ exports.openai = void 0;
 const openai_1 = __importDefault(require("openai"));
 exports.openai = new openai_1.default({
     apiKey: process.env.OPENAI_API_KEY,
+    timeout: 30_000,
+    maxRetries: 2,
 });
-//# sourceMappingURL=openai.js.map

@@ -26,6 +26,13 @@ exports.paymentController = {
      * Initiate mock checkout session.
      */
     async initiateCheckout(req, res) {
+        if (process.env.NODE_ENV === 'production') {
+            res.status(501).json({
+                success: false,
+                error: { code: 'PAYMENT_PROVIDER_NOT_CONFIGURED', message: 'Only verified Robi/Airtel carrier billing is available.' },
+            });
+            return;
+        }
         try {
             const userId = req.user?.userId;
             if (!userId) {
@@ -189,4 +196,3 @@ exports.paymentController = {
         }
     }
 };
-//# sourceMappingURL=paymentController.js.map

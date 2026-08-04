@@ -1,10 +1,11 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { prisma } from '../prisma';
-import OpenAI from 'openai';
+import { openai } from '../config/openai';
 import PDFDocument from 'pdfkit';
+import crypto from 'crypto';
+import { createQuizSession } from '../services/quizSessionService';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // =============================================
 // SUBJECT AUTO-CONFIG (fallback defaults)
@@ -42,6 +43,191 @@ async function isUserPremium(userId: string): Promise<boolean> {
   return user.subscription_status === 'REGISTERED' || user.userSubscriptions.length > 0;
 }
 
+async function submitIssuedQuiz(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
+
+    const { sessionId, answers, timeTakenSecs = 0 } = req.body;
+    if (typeof sessionId !== 'string' || !sessionId || !Array.isArray(answers) || answers.length > 100) {
+      res.status(400).json({ success: false, message: 'A valid sessionId and answers array are required' });
+      return;
+    }
+
+    const session = await prisma.quizSession.findFirst({ where: { id: sessionId, userId } });
+    if (!session) { res.status(404).json({ success: false, message: 'Quiz session not found' }); return; }
+    if (session.submittedAt) { res.status(409).json({ success: false, message: 'Quiz session was already submitted' }); return; }
+    if (session.expiresAt < new Date()) { res.status(410).json({ success: false, message: 'Quiz session expired' }); return; }
+
+    const answerMap = new Map<string, string>();
+    for (const answer of answers) {
+      if (!answer || typeof answer.questionId !== 'string' || typeof answer.optionId !== 'string') {
+        res.status(400).json({ success: false, message: 'Each answer must contain questionId and optionId' });
+        return;
+      }
+      if (answerMap.has(answer.questionId) || !session.questionIds.includes(answer.questionId)) {
+        res.status(400).json({ success: false, message: 'Answers contain duplicate or unissued questions' });
+        return;
+      }
+      answerMap.set(answer.questionId, answer.optionId);
+    }
+
+    const questions = await prisma.question.findMany({
+      where: { id: { in: session.questionIds } },
+      include: { options: true, topic: { include: { subject: { include: { category: true } } } } },
+    });
+    if (questions.length !== session.questionIds.length) {
+      res.status(409).json({ success: false, message: 'Quiz content changed; start a new session' });
+      return;
+    }
+
+    let correctCount = 0;
+    let totalMarks = 0;
+    let totalPossibleMarks = 0;
+    let negativeTotal = 0;
+    let skippedCount = 0;
+    const topicBreakdown: Record<string, { correct: number; wrong: number; total: number }> = {};
+
+    for (const question of questions) {
+      totalPossibleMarks += question.marks;
+      const topicName = question.topic?.name ?? 'General';
+      if (!topicBreakdown[topicName]) topicBreakdown[topicName] = { correct: 0, wrong: 0, total: 0 };
+      topicBreakdown[topicName].total += 1;
+
+      const optionId = answerMap.get(question.id);
+      if (!optionId) {
+        skippedCount += 1;
+        continue;
+      }
+
+      const selectedOption = question.options.find((option) => option.id === optionId);
+      if (!selectedOption) {
+        res.status(400).json({ success: false, message: 'An answer option does not belong to its question' });
+        return;
+      }
+
+      if (selectedOption.isCorrect) {
+        correctCount += 1;
+        totalMarks += question.marks;
+        topicBreakdown[topicName].correct += 1;
+      } else {
+        topicBreakdown[topicName].wrong += 1;
+        if (session.negativeMarking) negativeTotal += session.negativeValue;
+      }
+    }
+
+    const answeredCount = questions.length - skippedCount;
+    const finalScore = Math.max(0, totalMarks - negativeTotal);
+    const percentage = totalPossibleMarks > 0 ? Math.min(100, Math.max(0, (finalScore / totalPossibleMarks) * 100)) : 0;
+    const accuracy = answeredCount > 0 ? (correctCount / answeredCount) * 100 : 0;
+    const xpEarned = correctCount * 10;
+    const coinsEarned = correctCount * 5;
+    const weakAreas = Object.entries(topicBreakdown).filter(([, value]) => value.correct / value.total < 0.5).map(([name]) => name);
+    const strongAreas = Object.entries(topicBreakdown).filter(([, value]) => value.correct / value.total >= 0.7).map(([name]) => name);
+    const aiFeedback = weakAreas.length > 0
+      ? `Review ${weakAreas.slice(0, 3).join(', ')} and retry the missed questions after a short break.`
+      : 'Strong work. Use spaced review to retain what you learned.';
+    const topic = questions[0]?.topic;
+    const safeTimeTakenSecs = Math.min(session.durationSecs, Math.max(0, Math.floor(Number(timeTakenSecs) || 0)));
+
+    const result = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.quizSession.updateMany({
+        where: { id: session.id, userId, submittedAt: null, expiresAt: { gte: new Date() } },
+        data: { submittedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw new Error('QUIZ_ALREADY_SUBMITTED');
+
+      if (!session.premiumAtStart) {
+        const paidAccess = await tx.paidExamAccess.findFirst({ where: { userId, examId: session.topicId } });
+        if (paidAccess) {
+          await tx.paidExamAccess.delete({ where: { id: paidAccess.id } });
+        } else {
+          const consumed = await tx.user.updateMany({
+            where: { id: userId, freeExamsUsed: { lt: 1 } },
+            data: { freeExamsUsed: { increment: 1 } },
+          });
+          if (consumed.count !== 1) throw new Error('FREE_ATTEMPT_EXHAUSTED');
+        }
+      }
+
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { xp: { increment: xpEarned }, coins: { increment: coinsEarned } },
+        select: { xp: true, level: true },
+      });
+      const newLevel = Math.floor(user.xp / 100) + 1;
+      const levelUp = newLevel > user.level;
+      if (levelUp) await tx.user.update({ where: { id: userId }, data: { level: newLevel } });
+
+      const history = await tx.examHistory.create({
+        data: {
+          userId,
+          quizSessionId: session.id,
+          topicId: session.topicId,
+          subjectId: topic?.subjectId ?? null,
+          topicName: topic?.name ?? null,
+          categoryName: topic?.subject?.category?.name ?? null,
+          totalQuestions: questions.length,
+          correctAnswers: correctCount,
+          wrongAnswers: answeredCount - correctCount,
+          skippedAnswers: skippedCount,
+          score: finalScore,
+          totalMarks: totalPossibleMarks,
+          percentage,
+          timeTakenSecs: safeTimeTakenSecs,
+          accuracy,
+          xpEarned,
+          coinsEarned,
+          negativeMarking: session.negativeMarking,
+          negativeValue: session.negativeValue,
+          language: session.language,
+          aiFeedback,
+          weakAreas,
+          strongAreas,
+          topicBreakdown,
+          isPremium: session.premiumAtStart,
+        },
+      });
+
+      return { history, newLevel, levelUp };
+    }, { isolationLevel: 'Serializable' });
+
+    res.json({
+      success: true,
+      data: {
+        historyId: result.history.id,
+        score: finalScore,
+        correctAnswers: correctCount,
+        wrongAnswers: answeredCount - correctCount,
+        skippedAnswers: skippedCount,
+        totalQuestions: questions.length,
+        percentage: Number(percentage.toFixed(1)),
+        accuracy: Number(accuracy.toFixed(1)),
+        timeTakenSecs: safeTimeTakenSecs,
+        xpEarned,
+        coinsEarned,
+        newLevel: result.levelUp ? result.newLevel : null,
+        aiFeedback,
+        weakAreas,
+        strongAreas,
+        topicBreakdown,
+        isPremium: session.premiumAtStart,
+      },
+    });
+  } catch (error: any) {
+    if (error?.message === 'QUIZ_ALREADY_SUBMITTED') {
+      res.status(409).json({ success: false, message: 'Quiz session was already submitted' });
+      return;
+    }
+    if (error?.message === 'FREE_ATTEMPT_EXHAUSTED') {
+      res.status(402).json({ success: false, requirePaywall: true, message: 'Free trial limit reached. Please subscribe to continue.' });
+      return;
+    }
+    console.error('Issued quiz submission failed:', error);
+    res.status(500).json({ success: false, message: 'Failed to submit quiz' });
+  }
+}
+
 export const quizController = {
 
   async getCategories(req: AuthRequest, res: Response): Promise<void> {
@@ -63,20 +249,31 @@ export const quizController = {
       const userId = req.user?.userId;
       const { topicId, limit, enableNegativeMarking, negativeValue, language } = req.query;
 
-      if (!topicId) {
+      if (!userId) {
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+      }
+      if (typeof topicId !== 'string' || !topicId) {
         res.status(400).json({ success: false, message: 'topicId is required' });
         return;
       }
 
       // Fetch subject name for auto-config
       const topic = await prisma.topic.findUnique({
-        where: { id: String(topicId) },
+        where: { id: topicId },
         include: { subject: true }
       });
 
-      const autoConfig = await getQuizConfig(topic?.subject?.name ?? 'default');
+      if (!topic) {
+        res.status(404).json({ success: false, message: 'Topic not found' });
+        return;
+      }
 
-      let resolvedLimit = Number(limit) || autoConfig.questions;
+      const autoConfig = await getQuizConfig(topic.subject?.name ?? 'default');
+
+      const requestedLimit = Number(limit);
+      let resolvedLimit = Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : autoConfig.questions;
+      resolvedLimit = Math.min(100, Math.max(1, resolvedLimit));
       let isPremium = false;
 
       if (userId) {
@@ -102,12 +299,28 @@ export const quizController = {
         }
       }
 
+      const selectedLanguage = language === 'bangla' ? 'bangla' : 'english';
+      const requestedNegativeValue = Number(negativeValue);
+      const resolvedNegativeValue = Number.isFinite(requestedNegativeValue)
+        ? Math.min(1, Math.max(0, requestedNegativeValue))
+        : 0.25;
+      const resolvedNegativeMarking = isPremium && enableNegativeMarking === 'true';
+
       const allQuestions = await prisma.question.findMany({
         where: {
-          topicId: String(topicId),
-          ...(language && language !== 'all' ? { language: String(language) } : {}),
+          topicId,
+          language: selectedLanguage,
+          status: 'PUBLISHED',
         },
-        include: { options: { select: { id: true, text: true } } }
+        select: {
+          id: true,
+          text: true,
+          type: true,
+          difficulty: true,
+          marks: true,
+          language: true,
+          options: { select: { id: true, text: true } },
+        },
       });
 
       if (allQuestions.length === 0) {
@@ -115,19 +328,34 @@ export const quizController = {
         return;
       }
 
-      const shuffled = allQuestions.sort(() => 0.5 - Math.random());
+      const shuffled = [...allQuestions];
+      for (let i = shuffled.length - 1; i > 0; i -= 1) {
+        const j = crypto.randomInt(i + 1);
+        [shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!];
+      }
       const selected = shuffled.slice(0, resolvedLimit);
+      const session = await createQuizSession({
+        userId,
+        topicId,
+        questionIds: selected.map((question) => question.id),
+        durationSecs: autoConfig.timeMins * 60,
+        negativeMarking: resolvedNegativeMarking,
+        negativeValue: resolvedNegativeValue,
+        language: selectedLanguage,
+        premiumAtStart: isPremium,
+      });
 
       res.json({
         success: true,
         data: selected,
         config: {
+          sessionId: session.id,
           totalQuestions: selected.length,
           timeMins: autoConfig.timeMins,
           totalMarks: selected.length * 1,
           passingMarks: Math.ceil(selected.length * autoConfig.passingPct / 100),
-          enableNegativeMarking: enableNegativeMarking === 'true',
-          negativeValue: parseFloat(String(negativeValue ?? '0.25')),
+          enableNegativeMarking: resolvedNegativeMarking,
+          negativeValue: resolvedNegativeValue,
           isPremium,
         }
       });
@@ -141,6 +369,8 @@ export const quizController = {
   // =============================================
   // SUBMIT QUIZ – detailed result + save history
   // =============================================
+  submitQuizV2: submitIssuedQuiz,
+
   async submitQuiz(req: AuthRequest, res: Response): Promise<void> {
     try {
       const userId = req.user?.userId;
@@ -520,47 +750,50 @@ export const quizController = {
       const userId = req.user?.userId;
       if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
 
-      const user = await prisma.user.findUnique({ where: { id: userId } });
-      if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
+      const dhakaNow = new Date(Date.now() + 6 * 60 * 60 * 1000);
+      const rewardDate = new Date(Date.UTC(dhakaNow.getUTCFullYear(), dhakaNow.getUTCMonth(), dhakaNow.getUTCDate()));
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+      const reward = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.findUnique({ where: { id: userId } });
+        if (!user) throw new Error('USER_NOT_FOUND');
 
-      const existingReward = await prisma.dailyLoginReward.findFirst({
-        where: { userId, createdAt: { gte: today, lt: tomorrow } }
-      });
+        let isConsecutive = false;
+        if (user.lastLoginDate) {
+          const lastDhaka = new Date(user.lastLoginDate.getTime() + 6 * 60 * 60 * 1000);
+          const lastDate = Date.UTC(lastDhaka.getUTCFullYear(), lastDhaka.getUTCMonth(), lastDhaka.getUTCDate());
+          isConsecutive = rewardDate.getTime() - lastDate === 24 * 60 * 60 * 1000;
+        }
 
-      if (existingReward) {
+        const newStreak = isConsecutive ? user.streak + 1 : 1;
+        const coinsGranted = 10 + Math.min(newStreak * 2, 30);
+        const xpGranted = 5 + Math.min(newStreak, 10);
+
+        await tx.dailyLoginReward.create({
+          data: { userId, rewardDate, coinsGranted, xpGranted, streakDay: newStreak },
+        });
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            coins: { increment: coinsGranted },
+            xp: { increment: xpGranted },
+            streak: newStreak,
+            lastLoginDate: new Date(),
+          },
+        });
+
+        return { coinsGranted, xpGranted, streak: newStreak, alreadyClaimed: false };
+      }, { isolationLevel: 'Serializable' });
+
+      res.json({ success: true, data: reward });
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
         res.json({ success: false, alreadyClaimed: true, message: 'Already claimed today' });
         return;
       }
-
-      // Calculate streak
-      const lastLogin = user.lastLoginDate;
-      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-      const isConsecutive = lastLogin && lastLogin >= yesterday && lastLogin < today;
-      const newStreak = isConsecutive ? user.streak + 1 : 1;
-
-      const coinsGranted = 10 + Math.min(newStreak * 2, 30); // bonus for streak
-      const xpGranted = 5 + Math.min(newStreak, 10);
-
-      await prisma.dailyLoginReward.create({
-        data: { userId, coinsGranted, xpGranted, streakDay: newStreak }
-      });
-
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          coins: { increment: coinsGranted },
-          xp: { increment: xpGranted },
-          streak: newStreak,
-          lastLoginDate: new Date()
-        }
-      });
-
-      res.json({ success: true, data: { coinsGranted, xpGranted, streak: newStreak, alreadyClaimed: false } });
-    } catch (error: any) {
+      if (error?.message === 'USER_NOT_FOUND') {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
       console.error(error);
       res.status(500).json({ success: false, message: 'Failed to claim reward' });
     }

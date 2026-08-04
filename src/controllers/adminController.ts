@@ -3,12 +3,30 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import prisma from '../prisma';
 import bcrypt from 'bcrypt';
 import { realtimeService } from '../services/realtimeService';
+import { sanitizeProfileInput } from '../utils/profileInput';
+import type { Prisma } from '@prisma/client';
+
+const safeUserSelect = {
+  id: true,
+  email: true,
+  mobile: true,
+  role: true,
+  subscription_status: true,
+  coins: true,
+  xp: true,
+  level: true,
+  streak: true,
+  createdAt: true,
+  updatedAt: true,
+  profile: true,
+} as const;
 
 export const getAdminUsers = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const users = await prisma.user.findMany({
+      where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
-      include: { profile: true }
+      select: safeUserSelect,
     });
     res.json(users);
   } catch (error) {
@@ -24,22 +42,38 @@ export const updateUserRole = async (req: AuthRequest, res: Response): Promise<v
       res.status(400).json({ error: 'Invalid role' });
       return;
     }
+    const target = await prisma.user.findUnique({ where: { id }, select: { role: true, deletedAt: true } });
+    if (!target || target.deletedAt) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    if (id === req.user?.userId && role !== 'SUPER_ADMIN') {
+      res.status(409).json({ error: 'You cannot remove your own super-admin access' });
+      return;
+    }
+    if (target.role === 'SUPER_ADMIN' && role !== 'SUPER_ADMIN') {
+      const superAdminCount = await prisma.user.count({ where: { role: 'SUPER_ADMIN', deletedAt: null } });
+      if (superAdminCount <= 1) {
+        res.status(409).json({ error: 'At least one super admin must remain' });
+        return;
+      }
+    }
     const updated = await prisma.user.update({
       where: { id },
       data: { role },
-      include: { profile: true }
+      select: safeUserSelect,
     });
     
     await prisma.activityLog.create({
       data: {
         userId: req.user?.userId || '',
-        action: `Updated User ${updated.email} Role to ${role}`,
+        action: `Updated user ${updated.id} role to ${role}`,
         module: 'UserManagement',
         ipAddress: req.ip
       }
     });
 
-    realtimeService.emit('profile', 'user_updated', { userId: id, role, updated }, id);
+    realtimeService.emit('profile', 'user_updated', { userId: id, role }, id);
 
     res.json(updated);
   } catch (error) {
@@ -49,9 +83,18 @@ export const updateUserRole = async (req: AuthRequest, res: Response): Promise<v
 
 export const createAdminUser = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { email, password, name, role } = req.body;
-    if (!email || !password) {
-      res.status(400).json({ error: 'Missing parameters' });
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const password = req.body.password;
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    const targetRole = req.body.role === 'INSTRUCTOR' ? 'INSTRUCTOR' : 'ADMIN';
+    const validPassword = typeof password === 'string'
+      && password.length >= 12
+      && password.length <= 128
+      && /[a-z]/.test(password)
+      && /[A-Z]/.test(password)
+      && /\d/.test(password);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !validPassword) {
+      res.status(400).json({ error: 'Use a valid email and a strong 12-128 character password' });
       return;
     }
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -59,8 +102,7 @@ export const createAdminUser = async (req: AuthRequest, res: Response): Promise<
       res.status(400).json({ error: 'User already exists' });
       return;
     }
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const targetRole = role || 'ADMIN';
+    const hashedPassword = await bcrypt.hash(password, 12);
     const user = await prisma.user.create({
       data: {
         email,
@@ -70,19 +112,19 @@ export const createAdminUser = async (req: AuthRequest, res: Response): Promise<
           create: { name: name || 'Admin User' }
         }
       },
-      include: { profile: true }
+      select: safeUserSelect,
     });
 
     await prisma.activityLog.create({
       data: {
         userId: req.user?.userId || '',
-        action: `Created Admin User ${email}`,
+        action: `Created ${targetRole.toLowerCase()} user ${user.id}`,
         module: 'UserManagement',
         ipAddress: req.ip
       }
     });
 
-    realtimeService.emit('profile', 'user_created', { user });
+    realtimeService.emit('profile', 'user_created', { userId: user.id, role: user.role });
 
     res.status(201).json(user);
   } catch (error) {
@@ -101,10 +143,7 @@ export const getAdminProfile = async (req: AuthRequest, res: Response): Promise<
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { 
-        profile: true,
-        settings: true
-      }
+      select: { ...safeUserSelect, settings: true },
     });
 
     if (!user) {
@@ -127,15 +166,19 @@ export const updateAdminProfile = async (req: AuthRequest, res: Response): Promi
       return;
     }
 
-    const data = req.body;
+    const data = sanitizeProfileInput(req.body);
+    if (Object.keys(data).length === 0) {
+      res.status(400).json({ error: 'No valid profile fields supplied' });
+      return;
+    }
     
     const profile = await prisma.profile.upsert({
       where: { userId },
-      update: data,
+      update: data as Prisma.ProfileUncheckedUpdateInput,
       create: {
         userId,
         ...data,
-      }
+      } as Prisma.ProfileUncheckedCreateInput,
     });
 
     // Log Activity
@@ -169,7 +212,7 @@ export const getAdminDashboard = async (req: AuthRequest, res: Response): Promis
     const recentActivity = await prisma.activityLog.findMany({
       take: 10,
       orderBy: { createdAt: 'desc' },
-      include: { user: { include: { profile: true } } }
+      include: { user: { select: safeUserSelect } },
     });
 
     res.json({
@@ -191,7 +234,7 @@ export const getAdminActivityLogs = async (req: AuthRequest, res: Response): Pro
   try {
     const logs = await prisma.activityLog.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { user: { include: { profile: true } } }
+      include: { user: { select: safeUserSelect } },
     });
     res.json(logs);
   } catch (error) {
@@ -265,7 +308,7 @@ export const getAdminRevenue = async (req: AuthRequest, res: Response): Promise<
       transactions: await prisma.transaction.findMany({
         orderBy: { createdAt: 'desc' },
         take: 30,
-        include: { user: { include: { profile: true } } }
+        include: { user: { select: safeUserSelect } },
       }),
       monthlyData
     });
@@ -397,6 +440,16 @@ export const updateAdminSmsConfig = async (req: AuthRequest, res: Response): Pro
   }
 };
 
+export const getAdminSmsLogs = async (req: AuthRequest, res: Response): Promise<void> => {
+  const page = Math.max(1, Number.parseInt(String(req.query.page || '1'), 10));
+  const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || '50'), 10)));
+  const [total, logs] = await Promise.all([
+    prisma.smsLog.count(),
+    prisma.smsLog.findMany({ orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+  ]);
+  res.json({ success: true, data: logs, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+};
+
 // ==========================================
 // SUBSCRIPTION MANAGEMENT (BDApps + generic plans)
 // ==========================================
@@ -461,7 +514,7 @@ export const getAdminPaymentLogs = async (req: AuthRequest, res: Response): Prom
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
-        include: { user: { include: { profile: true } } },
+        include: { user: { select: safeUserSelect } },
       }),
       prisma.webhookLog.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }),
     ]);
@@ -530,4 +583,39 @@ export const getAdminSubscriptionAnalytics = async (req: AuthRequest, res: Respo
     console.error(error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
+};
+
+export const getAdminQuizConfigs = async (_req: AuthRequest, res: Response): Promise<void> => {
+  const configs = await prisma.subjectQuizConfig.findMany({ orderBy: { subjectName: 'asc' } });
+  res.json({ success: true, data: configs });
+};
+
+export const upsertAdminQuizConfig = async (req: AuthRequest, res: Response): Promise<void> => {
+  const subjectName = String(req.body.subjectName || '').trim();
+  const defaultQuestions = Math.floor(Number(req.body.defaultQuestions));
+  const defaultTimeMins = Math.floor(Number(req.body.defaultTimeMins));
+  const defaultPassingPct = Number(req.body.defaultPassingPct);
+  const marksPerQuestion = Number(req.body.marksPerQuestion);
+  const negativeMarksDefault = Number(req.body.negativeMarksDefault);
+
+  if (!subjectName || subjectName.length > 100
+    || !Number.isInteger(defaultQuestions) || defaultQuestions < 1 || defaultQuestions > 200
+    || !Number.isInteger(defaultTimeMins) || defaultTimeMins < 1 || defaultTimeMins > 300
+    || !Number.isFinite(defaultPassingPct) || defaultPassingPct < 0 || defaultPassingPct > 100
+    || !Number.isFinite(marksPerQuestion) || marksPerQuestion <= 0 || marksPerQuestion > 100
+    || !Number.isFinite(negativeMarksDefault) || negativeMarksDefault < 0 || negativeMarksDefault > marksPerQuestion) {
+    res.status(400).json({ success: false, message: 'Invalid quiz configuration' });
+    return;
+  }
+
+  const config = await prisma.subjectQuizConfig.upsert({
+    where: { subjectName: subjectName.toLowerCase() },
+    update: { defaultQuestions, defaultTimeMins, defaultPassingPct, marksPerQuestion, negativeMarksDefault },
+    create: {
+      subjectName: subjectName.toLowerCase(), defaultQuestions, defaultTimeMins,
+      defaultPassingPct, marksPerQuestion, negativeMarksDefault,
+    },
+  });
+  realtimeService.emit('app_config', 'quiz_config_updated', { subjectName: config.subjectName });
+  res.json({ success: true, data: config });
 };

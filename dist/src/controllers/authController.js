@@ -5,18 +5,37 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.login = exports.register = void 0;
 const bcrypt_1 = __importDefault(require("bcrypt"));
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const prisma_1 = __importDefault(require("../prisma"));
-const jwt_1 = require("../config/jwt");
+const authService_1 = require("../services/authService");
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function validatePassword(password) {
+    return typeof password === 'string'
+        && password.length >= 12
+        && password.length <= 128
+        && /[a-z]/.test(password)
+        && /[A-Z]/.test(password)
+        && /\d/.test(password);
+}
 const register = async (req, res) => {
     try {
-        const { email, password, name, firstName, lastName } = req.body;
-        const existingUser = await prisma_1.default.user.findUnique({ where: { email } });
-        if (existingUser) {
-            res.status(400).json({ error: 'User already exists' });
+        const { password, name, firstName, lastName } = req.body;
+        const email = String(req.body.email || '').trim().toLowerCase();
+        if (!EMAIL_PATTERN.test(email) || !validatePassword(password)) {
+            res.status(400).json({
+                success: false,
+                error: {
+                    code: 'INVALID_REGISTRATION',
+                    message: 'Use a valid email and a 12-128 character password containing upper-case, lower-case, and numeric characters.',
+                },
+            });
             return;
         }
-        const hashedPassword = await bcrypt_1.default.hash(password, 10);
+        const existingUser = await prisma_1.default.user.findUnique({ where: { email } });
+        if (existingUser) {
+            res.status(409).json({ success: false, error: { code: 'ACCOUNT_EXISTS', message: 'An account already exists for this email.' } });
+            return;
+        }
+        const hashedPassword = await bcrypt_1.default.hash(password, 12);
         const profileName = name || [firstName, lastName].filter(Boolean).join(' ') || 'Unknown User';
         // Role is never taken from client input — self-registration is always a
         // STUDENT. Admin accounts can only be created via the requireSuperAdmin
@@ -31,7 +50,7 @@ const register = async (req, res) => {
                 }
             }
         });
-        res.status(201).json({ message: 'User registered successfully', userId: user.id });
+        res.status(201).json({ success: true, data: { userId: user.id }, message: 'User registered successfully' });
     }
     catch (error) {
         console.error('Register error:', error);
@@ -41,18 +60,23 @@ const register = async (req, res) => {
 exports.register = register;
 const login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const email = String(req.body.email || '').trim().toLowerCase();
+        const password = req.body.password;
+        if (!EMAIL_PATTERN.test(email) || typeof password !== 'string') {
+            res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' } });
+            return;
+        }
         const user = await prisma_1.default.user.findUnique({ where: { email } });
-        if (!user || !user.password) {
-            res.status(401).json({ error: 'Invalid credentials' });
+        if (!user || user.deletedAt || !user.password) {
+            res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' } });
             return;
         }
         const isMatch = await bcrypt_1.default.compare(password, user.password);
         if (!isMatch) {
-            res.status(401).json({ error: 'Invalid credentials' });
+            res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' } });
             return;
         }
-        const token = jsonwebtoken_1.default.sign({ userId: user.id, role: user.role }, jwt_1.JWT_SECRET, { expiresIn: '1d' });
+        const token = (0, authService_1.issueAccessToken)(user);
         res.json({ token, role: user.role });
     }
     catch (error) {
@@ -61,4 +85,3 @@ const login = async (req, res) => {
     }
 };
 exports.login = login;
-//# sourceMappingURL=authController.js.map

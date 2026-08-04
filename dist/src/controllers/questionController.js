@@ -3,9 +3,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importQuestions = exports.updateQuestion = exports.deleteQuestion = exports.createQuestion = exports.getQuestions = void 0;
+exports.importQuestions = exports.archiveQuestion = exports.updateQuestion = exports.deleteQuestion = exports.createQuestion = exports.getQuestions = void 0;
 const prisma_1 = __importDefault(require("../prisma"));
 const realtimeService_1 = require("../services/realtimeService");
+const QUESTION_STATUSES = new Set(['DRAFT', 'PUBLISHED', 'PRIVATE', 'ARCHIVED']);
 const getQuestions = async (req, res) => {
     try {
         const questions = await prisma_1.default.question.findMany({
@@ -22,6 +23,11 @@ exports.getQuestions = getQuestions;
 const createQuestion = async (req, res) => {
     try {
         const { text, type, difficulty, marks, negativeMarks, language, explanation, hint, subjectId, topicId, options } = req.body;
+        const status = QUESTION_STATUSES.has(req.body.status) ? req.body.status : 'DRAFT';
+        if (!text || !Array.isArray(options) || options.length < 2 || options.filter((option) => option?.isCorrect === true).length !== 1) {
+            res.status(400).json({ error: 'A question needs text, at least two options, and exactly one correct option.' });
+            return;
+        }
         const question = await prisma_1.default.question.create({
             data: {
                 text,
@@ -34,13 +40,15 @@ const createQuestion = async (req, res) => {
                 hint,
                 subjectId,
                 topicId,
+                status,
+                createdById: req.user?.userId,
                 options: {
                     create: options // expects an array of { text, isCorrect }
                 }
             },
             include: { options: true }
         });
-        realtimeService_1.realtimeService.emit('questions', 'question_created', { question });
+        realtimeService_1.realtimeService.emit('questions', 'question_created', { questionId: question.id });
         res.status(201).json(question);
     }
     catch (error) {
@@ -51,22 +59,16 @@ exports.createQuestion = createQuestion;
 const deleteQuestion = async (req, res) => {
     try {
         const id = req.params.id;
-        // Delete related options first
-        await prisma_1.default.option.deleteMany({
-            where: { questionId: id }
-        });
-        // Delete related exam questions
-        await prisma_1.default.examQuestion.deleteMany({
-            where: { questionId: id }
-        });
-        // Delete related student answers
-        await prisma_1.default.studentAnswer.deleteMany({
-            where: { questionId: id }
-        });
-        // Then delete question
-        await prisma_1.default.question.delete({
-            where: { id }
-        });
+        const answerCount = await prisma_1.default.studentAnswer.count({ where: { questionId: id } });
+        if (answerCount > 0) {
+            res.status(409).json({ error: 'This question has attempt history and cannot be deleted. Archive support is required instead.' });
+            return;
+        }
+        await prisma_1.default.$transaction([
+            prisma_1.default.option.deleteMany({ where: { questionId: id } }),
+            prisma_1.default.examQuestion.deleteMany({ where: { questionId: id } }),
+            prisma_1.default.question.delete({ where: { id } }),
+        ]);
         realtimeService_1.realtimeService.emit('questions', 'question_deleted', { id });
         res.json({ success: true, message: 'Question deleted successfully' });
     }
@@ -80,42 +82,41 @@ const updateQuestion = async (req, res) => {
     try {
         const id = req.params.id;
         const { text, type, difficulty, marks, negativeMarks, language, explanation, hint, subjectId, topicId, options } = req.body;
-        // Update question fields
-        const question = await prisma_1.default.question.update({
-            where: { id },
-            data: {
-                text,
-                type,
-                difficulty,
-                marks,
-                negativeMarks,
-                language: language || 'english',
-                explanation,
-                hint,
-                subjectId,
-                topicId
+        const status = req.body.status === undefined
+            ? undefined
+            : (QUESTION_STATUSES.has(req.body.status) ? req.body.status : null);
+        if (status === null) {
+            res.status(400).json({ error: 'Invalid question status' });
+            return;
+        }
+        if (Array.isArray(options) && (options.length < 2 || options.filter((option) => option?.isCorrect === true).length !== 1)) {
+            res.status(400).json({ error: 'A question needs at least two options and exactly one correct option.' });
+            return;
+        }
+        if (Array.isArray(options)) {
+            const answerCount = await prisma_1.default.studentAnswer.count({ where: { questionId: id } });
+            if (answerCount > 0) {
+                res.status(409).json({ error: 'Options cannot be replaced after students have answered this question.' });
+                return;
+            }
+        }
+        await prisma_1.default.$transaction(async (tx) => {
+            await tx.question.update({
+                where: { id },
+                data: { text, type, difficulty, marks, negativeMarks, language: language || 'english', explanation, hint, subjectId, topicId, status },
+            });
+            if (Array.isArray(options)) {
+                await tx.option.deleteMany({ where: { questionId: id } });
+                await tx.option.createMany({
+                    data: options.map((opt) => ({ text: opt.text, isCorrect: !!opt.isCorrect, questionId: id })),
+                });
             }
         });
-        // Update options if provided
-        if (options && Array.isArray(options)) {
-            // Clean delete existing options
-            await prisma_1.default.option.deleteMany({
-                where: { questionId: id }
-            });
-            // Recreate options
-            await prisma_1.default.option.createMany({
-                data: options.map((opt) => ({
-                    text: opt.text,
-                    isCorrect: !!opt.isCorrect,
-                    questionId: id
-                }))
-            });
-        }
         const updatedQuestion = await prisma_1.default.question.findUnique({
             where: { id },
             include: { options: true }
         });
-        realtimeService_1.realtimeService.emit('questions', 'question_updated', { question: updatedQuestion });
+        realtimeService_1.realtimeService.emit('questions', 'question_updated', { questionId: id });
         res.json(updatedQuestion);
     }
     catch (error) {
@@ -124,6 +125,18 @@ const updateQuestion = async (req, res) => {
     }
 };
 exports.updateQuestion = updateQuestion;
+const archiveQuestion = async (req, res) => {
+    try {
+        const id = req.params.id;
+        const question = await prisma_1.default.question.update({ where: { id }, data: { status: 'ARCHIVED' } });
+        realtimeService_1.realtimeService.emit('questions', 'question_archived', { questionId: id });
+        res.json({ success: true, data: { id: question.id, status: question.status } });
+    }
+    catch {
+        res.status(404).json({ error: 'Question not found' });
+    }
+};
+exports.archiveQuestion = archiveQuestion;
 const importQuestions = async (req, res) => {
     try {
         const { csvText } = req.body;
@@ -219,6 +232,7 @@ const importQuestions = async (req, res) => {
                     marks: 5,
                     language: language,
                     explanation,
+                    status: 'DRAFT',
                     topicId,
                     subjectId,
                     options: {
@@ -237,4 +251,3 @@ const importQuestions = async (req, res) => {
     }
 };
 exports.importQuestions = importQuestions;
-//# sourceMappingURL=questionController.js.map

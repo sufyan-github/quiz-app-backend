@@ -14,11 +14,11 @@ export declare const smsService: {
      * Send SMS to a specific mobile number (Student or Guardian)
      */
     sendSms(mobile: string, message: string, userId?: string): Promise<{
-        message: string;
         id: string;
         mobile: string;
         createdAt: Date;
         status: string;
+        message: string;
     }>;
     /**
      * Send notification to user AND their linked guardian (if configured)

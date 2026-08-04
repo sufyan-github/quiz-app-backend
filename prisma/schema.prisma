@@ -34,6 +34,7 @@ enum Difficulty {
 model User {
   id                  String  @id @default(uuid())
   email               String  @unique
+  firebaseUid         String? @unique
   password            String?
   mobile              String? @unique
   subscription_status String  @default("UNSUBSCRIBED")
@@ -44,6 +45,7 @@ model User {
   freeExamsUsed       Int     @default(0)
   freeAiGenerationsUsed Int   @default(0)
   lastLoginDate       DateTime?
+  deletedAt           DateTime?
 
   role      Role     @default(STUDENT)
   createdAt DateTime @default(now())
@@ -69,6 +71,23 @@ model User {
   guardianLink      GuardianLink?
   examHistories     ExamHistory[]
   dailyLoginRewards DailyLoginReward[]
+  quizSessions      QuizSession[]
+  studyPlanCache    StudyPlanCache?
+
+  @@index([deletedAt])
+}
+
+model StudyPlanCache {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id])
+  payload           Json
+  sourceFingerprint String
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([expiresAt])
 }
 
 
@@ -169,6 +188,9 @@ model Question {
   language      String       @default("english")
   explanation   String?
   hint          String?
+  status        String       @default("PUBLISHED") // DRAFT, PUBLISHED, PRIVATE, ARCHIVED
+  createdById   String?
+  isAiGenerated Boolean      @default(false)
 
   subjectId String?
   subject   Subject? @relation(fields: [subjectId], references: [id])
@@ -178,6 +200,9 @@ model Question {
   options        Option[]
   examQuestions  ExamQuestion[]
   studentAnswers StudentAnswer[]
+
+  @@index([topicId, language, status])
+  @@index([createdById, status])
 }
 
 model Option {
@@ -207,12 +232,15 @@ model Exam {
   durationMins Int? // Overall timer
   passingMarks Float     @default(40.0)
   maxAttempts  Int? // Null means unlimited
+  status       String    @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   questions ExamQuestion[]
   attempts  ExamAttempt[]
+
+  @@index([status, startDate, endDate])
 }
 
 model ExamQuestion {
@@ -240,6 +268,9 @@ model ExamAttempt {
 
   answers StudentAnswer[]
   result  Result?
+
+  @@index([studentId, status])
+  @@index([examId, studentId])
 }
 
 model StudentAnswer {
@@ -253,6 +284,8 @@ model StudentAnswer {
   textAnswer       String? // For fill in blanks / short answer
   isCorrect        Boolean?
   marksAwarded     Float?
+
+  @@unique([attemptId, questionId])
 }
 
 model Result {
@@ -289,6 +322,8 @@ model Notification {
   message   String
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model UserSettings {
@@ -374,7 +409,7 @@ model UserAchievement {
 // handler (subscriptionController.handleWebhook) - never by the client.
 model Subscription {
   id            String    @id @default(uuid())
-  subscriber_id String
+  subscriber_id String    @unique
   user          User      @relation(fields: [subscriber_id], references: [id])
   status        String    @default("REGISTERED") // REGISTERED, UNSUBSCRIBED
   operator      String? // ROBI, AIRTEL - unknown for older rows
@@ -384,7 +419,6 @@ model Subscription {
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt
 
-  @@index([subscriber_id])
   @@index([status])
 }
 
@@ -627,7 +661,33 @@ model ExamHistory {
   strongAreas     String[] // topic names
   topicBreakdown  Json     @default("{}")
   isPremium       Boolean  @default(false)
+  quizSessionId   String?  @unique
+  quizSession     QuizSession? @relation(fields: [quizSessionId], references: [id])
   createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// A server-issued question set. It owns scoring configuration and can be
+// submitted exactly once, preventing client-created/replayed reward claims.
+model QuizSession {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  topicId           String
+  questionIds       String[]
+  negativeMarking   Boolean  @default(false)
+  negativeValue     Float    @default(0.25)
+  language          String   @default("english")
+  premiumAtStart    Boolean  @default(false)
+  durationSecs      Int
+  startedAt         DateTime @default(now())
+  expiresAt         DateTime
+  submittedAt       DateTime?
+  history           ExamHistory?
+
+  @@index([userId, startedAt])
+  @@index([expiresAt])
 }
 
 // ==========================================
@@ -685,7 +745,8 @@ model DailyLoginReward {
   coinsGranted Int     @default(10)
   xpGranted   Int      @default(5)
   streakDay   Int      @default(1)
+  rewardDate  DateTime @db.Date
   createdAt   DateTime @default(now())
 
-  @@unique([userId, createdAt])
+  @@unique([userId, rewardDate])
 }

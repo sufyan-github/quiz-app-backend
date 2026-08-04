@@ -1,64 +1,65 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.realtimeService = void 0;
 const socket_io_1 = require("socket.io");
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const jwt_1 = require("../config/jwt");
+const authService_1 = require("./authService");
+const securityMiddleware_1 = require("../middleware/securityMiddleware");
 class RealtimeService {
     io = null;
+    initialVersion = Date.now();
     moduleVersions = {
-        categories: { version: 1, updatedAt: new Date().toISOString() },
-        questions: { version: 1, updatedAt: new Date().toISOString() },
-        quizsets: { version: 1, updatedAt: new Date().toISOString() },
-        studyplan: { version: 1, updatedAt: new Date().toISOString() },
-        premium: { version: 1, updatedAt: new Date().toISOString() },
-        payments: { version: 1, updatedAt: new Date().toISOString() },
-        coupons: { version: 1, updatedAt: new Date().toISOString() },
-        notifications: { version: 1, updatedAt: new Date().toISOString() },
-        leaderboard: { version: 1, updatedAt: new Date().toISOString() },
-        profile: { version: 1, updatedAt: new Date().toISOString() },
-        dashboard: { version: 1, updatedAt: new Date().toISOString() },
-        banners: { version: 1, updatedAt: new Date().toISOString() },
-        advertisements: { version: 1, updatedAt: new Date().toISOString() },
-        app_config: { version: 1, updatedAt: new Date().toISOString() },
-        ai_settings: { version: 1, updatedAt: new Date().toISOString() },
-        subscription_plans: { version: 1, updatedAt: new Date().toISOString() },
-        feature_flags: { version: 1, updatedAt: new Date().toISOString() },
+        categories: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        questions: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        quizsets: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        studyplan: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        premium: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        payments: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        coupons: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        notifications: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        leaderboard: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        profile: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        dashboard: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        banners: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        advertisements: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        app_config: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        ai_settings: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        subscription_plans: { version: this.initialVersion, updatedAt: new Date().toISOString() },
+        feature_flags: { version: this.initialVersion, updatedAt: new Date().toISOString() },
     };
     init(httpServer) {
         this.io = new socket_io_1.Server(httpServer, {
             cors: {
-                origin: '*',
+                origin: (origin, callback) => {
+                    const allowed = (0, securityMiddleware_1.allowedCorsOrigins)();
+                    if (!origin || allowed.includes(origin))
+                        callback(null, true);
+                    else
+                        callback(new Error('Origin is not allowed'));
+                },
                 methods: ['GET', 'POST', 'PUT', 'DELETE'],
             },
             pingTimeout: 30000,
             pingInterval: 10000,
         });
-        this.io.use((socket, next) => {
+        this.io.use(async (socket, next) => {
             const token = socket.handshake.auth.token || socket.handshake.headers.authorization;
-            if (token) {
-                try {
-                    const cleanToken = token.replace('Bearer ', '');
-                    const decoded = jsonwebtoken_1.default.verify(cleanToken, jwt_1.JWT_SECRET);
-                    socket.userId = decoded.userId;
-                }
-                catch (err) {
-                    // Allow anonymous socket connections with public room
-                }
-            }
+            if (typeof token !== 'string')
+                return next(new Error('Authentication required'));
+            const cleanToken = token.replace(/^Bearer\s+/i, '');
+            const user = await (0, authService_1.resolveAuthToken)(cleanToken);
+            if (!user)
+                return next(new Error('Authentication failed'));
+            socket.userId = user.userId;
+            socket.role = user.role;
             next();
         });
         this.io.on('connection', (socket) => {
             const userId = socket.userId;
-            console.log(`[RealtimeSocket] Client connected: ${socket.id} (User: ${userId || 'Guest'})`);
+            console.log(`[RealtimeSocket] Client connected: ${socket.id}`);
             // Join global broadcast room
             socket.join('global_room');
-            if (userId) {
-                socket.join(`user_${userId}`);
-            }
+            socket.join(`user_${userId}`);
+            socket.join(`role_${socket.role}`);
             // Handshake: send current data versions to client
             socket.emit('sync_handshake', {
                 serverVersions: this.moduleVersions,
@@ -91,7 +92,7 @@ class RealtimeService {
         }
         // Increment module data version
         if (!this.moduleVersions[moduleName]) {
-            this.moduleVersions[moduleName] = { version: 1, updatedAt: new Date().toISOString() };
+            this.moduleVersions[moduleName] = { version: Date.now(), updatedAt: new Date().toISOString() };
         }
         else {
             this.moduleVersions[moduleName].version += 1;
@@ -118,4 +119,3 @@ class RealtimeService {
     }
 }
 exports.realtimeService = new RealtimeService();
-//# sourceMappingURL=realtimeService.js.map

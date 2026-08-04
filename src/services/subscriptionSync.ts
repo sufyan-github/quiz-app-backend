@@ -22,36 +22,37 @@ interface SyncParams {
 // recheck endpoint (subscriptionController.verifyNow) - nowhere else
 // should touch Subscription or User.subscription_status for BDApps state.
 export async function syncBdappsSubscription({ userId, status, referenceNo, operator, source }: SyncParams): Promise<void> {
-  const existing = await prisma.subscription.findFirst({ where: { subscriber_id: userId } });
-  const wasRegistered = existing?.status === 'REGISTERED';
+  const normalizedStatus = status === 'REGISTERED' ? 'REGISTERED' : 'UNSUBSCRIBED';
 
-  if (existing) {
-    await prisma.subscription.update({
-      where: { id: existing.id },
-      data: {
-        status,
-        operator: operator ?? existing.operator,
-        referenceNo: referenceNo ?? existing.referenceNo,
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.subscription.findUnique({ where: { subscriber_id: userId } });
+    const wasRegistered = existing?.status === 'REGISTERED';
+
+    await tx.subscription.upsert({
+      where: { subscriber_id: userId },
+      update: {
+        status: normalizedStatus,
+        operator: operator ?? existing?.operator ?? null,
+        referenceNo: referenceNo ?? existing?.referenceNo ?? null,
+        lastCheckedAt: new Date(),
+      },
+      create: {
+        subscriber_id: userId,
+        status: normalizedStatus,
+        operator: operator ?? null,
+        referenceNo: referenceNo ?? null,
         lastCheckedAt: new Date(),
       },
     });
-  } else {
-    await prisma.subscription.create({
-      data: { subscriber_id: userId, status, operator: operator ?? null, referenceNo: referenceNo ?? null, lastCheckedAt: new Date() },
-    });
-  }
 
-  await prisma.user.update({ where: { id: userId }, data: { subscription_status: status } });
+    await tx.user.update({ where: { id: userId }, data: { subscription_status: normalizedStatus } });
 
-  // Only log a Transaction on a genuine new-activation transition - never
-  // fabricate a "transaction" for an unsubscribe event or a no-op status
-  // refresh where nothing actually changed hands.
-  if (status === 'REGISTERED' && !wasRegistered) {
-    const transactionId = referenceNo || `bdapps_${source.toLowerCase()}_${userId}_${Date.now()}`;
-    const alreadyLogged = await prisma.transaction.findUnique({ where: { transactionId } });
-    if (!alreadyLogged) {
-      await prisma.transaction.create({
-        data: {
+    if (normalizedStatus === 'REGISTERED' && !wasRegistered) {
+      const transactionId = referenceNo || `bdapps_${source.toLowerCase()}_${userId}_${Date.now()}`;
+      await tx.transaction.upsert({
+        where: { transactionId },
+        update: {},
+        create: {
           userId,
           amount: BDAPPS_DAILY_RATE_BDT,
           currency: 'BDT',
@@ -62,5 +63,5 @@ export async function syncBdappsSubscription({ userId, status, referenceNo, oper
         },
       });
     }
-  }
+  }, { isolationLevel: 'Serializable' });
 }

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getUserDetails = exports.getAllUsers = exports.getProfile = exports.updateProfile = void 0;
 const prisma_1 = __importDefault(require("../prisma"));
+const profileInput_1 = require("../utils/profileInput");
 const updateProfile = async (req, res) => {
     try {
         const userId = req.user?.userId;
@@ -12,26 +13,18 @@ const updateProfile = async (req, res) => {
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-        const { name, institution, department, semester, phone, avatarUrl, photo } = req.body;
+        const data = (0, profileInput_1.sanitizeProfileInput)(req.body);
+        if (Object.keys(data).length === 0) {
+            res.status(400).json({ error: 'No valid profile fields supplied' });
+            return;
+        }
         const profile = await prisma_1.default.profile.upsert({
             where: { userId },
-            update: {
-                name,
-                institution,
-                department,
-                semester,
-                phone,
-                photo: photo || avatarUrl
-            },
+            update: data,
             create: {
                 userId,
-                name,
-                institution,
-                department,
-                semester,
-                phone,
-                photo: photo || avatarUrl
-            }
+                ...data,
+            },
         });
         res.json(profile);
     }
@@ -50,7 +43,7 @@ const getProfile = async (req, res) => {
         }
         const user = await prisma_1.default.user.findUnique({
             where: { id: userId },
-            include: { profile: true }
+            select: { email: true, role: true, profile: true }
         });
         if (!user) {
             res.status(404).json({ error: 'User not found' });
@@ -71,6 +64,7 @@ exports.getProfile = getProfile;
 const getAllUsers = async (req, res) => {
     try {
         const users = await prisma_1.default.user.findMany({
+            where: { deletedAt: null },
             include: { profile: true },
             orderBy: { createdAt: 'desc' }
         });
@@ -128,4 +122,3 @@ const getUserDetails = async (req, res) => {
     }
 };
 exports.getUserDetails = getUserDetails;
-//# sourceMappingURL=userController.js.map

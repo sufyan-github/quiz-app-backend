@@ -9,7 +9,7 @@ export const smsService = {
     if (!config) {
       config = await prisma.smsGatewayConfig.create({
         data: {
-          provider: 'MOCK',
+          provider: 'DISABLED',
           costPerSms: 0.30,
           senderId: 'QUIZAPP'
         }
@@ -26,19 +26,13 @@ export const smsService = {
       const config = await this.getConfig();
       const cleanMobile = mobile.replace(/\D+/g, '');
 
-      // Simulate sending via SMS gateway
-      console.log(`[SMS OUTBOX] To: ${cleanMobile} | Msg: "${message}" | Cost: ৳${config.costPerSms}`);
+      if (config.provider === 'MOCK' || config.provider === 'DISABLED') {
+        return prisma.smsLog.create({
+          data: { mobile: cleanMobile, message, status: 'SKIPPED' },
+        });
+      }
 
-      // Log the SMS transaction in database
-      const log = await prisma.smsLog.create({
-        data: {
-          mobile: cleanMobile,
-          message: message,
-          status: 'DELIVERED', // Simulate success status
-        }
-      });
-
-      return log;
+      throw new Error(`Unsupported SMS provider: ${config.provider}`);
     } catch (err: any) {
       console.error('Failed to send SMS:', err.message);
       // Even if failed, log the attempt

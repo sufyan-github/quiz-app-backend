@@ -9,4 +9,3 @@ const router = (0, express_1.Router)();
 router.post('/generate-quiz', demoController_1.demoController.generateDemoQuiz);
 router.post('/trial-session', demoController_1.demoController.startTrialSession);
 exports.default = router;
-//# sourceMappingURL=demoRoutes.js.map

@@ -1,14 +1,10 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.bdappsController = void 0;
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const prisma_1 = require("../prisma");
 const bdappsService_1 = require("../services/bdappsService");
 const subscriptionSync_1 = require("../services/subscriptionSync");
-const jwt_1 = require("../config/jwt");
+const authService_1 = require("../services/authService");
 exports.bdappsController = {
     async sendOtp(req, res) {
         try {
@@ -31,19 +27,15 @@ exports.bdappsController = {
             // an unregistered number, or a register attempt for an already-registered
             // one, should fail fast without ever calling out to BDApps.
             const existingUser = await prisma_1.prisma.user.findUnique({ where: { mobile: digits } });
-            console.log(`[OTP Send] mode=${mode} mobile=${digits} existingUser=${existingUser ? existingUser.id : 'none'}`);
             if (mode === 'login' && !existingUser) {
-                console.log(`[OTP Send] BLOCKED: login attempted for unregistered number ${digits}`);
                 res.json({ success: false, statusCode: 'USER_NOT_FOUND', message: 'This mobile number is not registered. Please register first.' });
                 return;
             }
             if (mode === 'register' && existingUser) {
-                console.log(`[OTP Send] BLOCKED: register attempted for already-registered number ${digits}`);
                 res.json({ success: false, statusCode: 'USER_ALREADY_EXISTS', message: 'This number is already registered. Please log in.' });
                 return;
             }
             const subscriberId = `tel:88${digits}`;
-            console.log(`[OTP Send] existence check passed, forwarding to BDApps gateway for ${subscriberId}`);
             const data = await bdappsService_1.bdappsService.sendOtp(subscriberId, digits);
             if (data.referenceNo) {
                 res.json({
@@ -76,9 +68,7 @@ exports.bdappsController = {
                 res.status(400).json({ statusCode: 'FAILED', message: 'Missing OTP code or referenceNo' });
                 return;
             }
-            console.log(`[OTP Verify] mode=${mode} referenceNo=${referenceNo}`);
             const data = await bdappsService_1.bdappsService.verifyOtp(referenceNo, Otp);
-            console.log(`[OTP Verify] BDApps gateway response statusCode=${data.statusCode}`);
             if (data.statusCode === 'S1000' && data.subscriberId) {
                 // .replace('tel:88', '0') substitutes the prefix instead of removing
                 // it, which corrupts the number with an extra leading zero (since
@@ -86,9 +76,7 @@ exports.bdappsController = {
                 // entirely instead.
                 const mobile = data.subscriberId.replace(/^tel:88/, '');
                 let user = await prisma_1.prisma.user.findUnique({ where: { mobile } });
-                console.log(`[OTP Verify] mobile=${mobile} existingUser=${user ? user.id : 'none'}`);
                 if (mode === 'login' && !user) {
-                    console.log(`[OTP Verify] BLOCKED: login verify succeeded but no user record exists for ${mobile}`);
                     // The send-otp existence check should have already caught this;
                     // this is a safety net so a login attempt never silently creates
                     // an account.
@@ -97,11 +85,10 @@ exports.bdappsController = {
                 }
                 const subscriptionStatus = data.subscriptionStatus || 'REGISTERED';
                 if (!user) {
-                    console.log(`[OTP Verify] creating new user for ${mobile}`);
                     user = await prisma_1.prisma.user.create({
                         data: {
                             mobile,
-                            email: `${mobile}@example.com`,
+                            email: `${mobile}@users.quizai.local`,
                             subscription_status: subscriptionStatus,
                             // authController.register (email/password signup) creates a
                             // Profile too; BDApps-registered users were missing one.
@@ -110,10 +97,6 @@ exports.bdappsController = {
                             }
                         }
                     });
-                    console.log(`[OTP Verify] user created id=${user.id} with profile`);
-                }
-                else {
-                    console.log(`[OTP Verify] updating existing user id=${user.id}`);
                 }
                 // Single real write path for BDApps subscription state - also
                 // upserts the Subscription row and logs a Transaction on a genuine
@@ -126,8 +109,7 @@ exports.bdappsController = {
                     source: 'OTP_VERIFY',
                 });
                 user = await prisma_1.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-                const token = jsonwebtoken_1.default.sign({ userId: user.id, mobile: user.mobile, role: user.role }, jwt_1.JWT_SECRET, { expiresIn: '7d' });
-                console.log(`[OTP Verify] token generated, returning success for user id=${user.id}`);
+                const token = (0, authService_1.issueAccessToken)(user);
                 res.json({
                     statusCode: 'S1000',
                     statusDetail: data.statusDetail || 'Success',
@@ -180,4 +162,3 @@ exports.bdappsController = {
         }
     }
 };
-//# sourceMappingURL=bdappsController.js.map

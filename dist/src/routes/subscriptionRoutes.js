@@ -20,4 +20,3 @@ router.get('/plans', subscriptionController_1.subscriptionController.plans);
 router.post('/verify', subscriptionController_1.subscriptionController.verifyNow);
 router.post('/cancel', subscriptionController_1.subscriptionController.cancel);
 exports.default = router;
-//# sourceMappingURL=subscriptionRoutes.js.map

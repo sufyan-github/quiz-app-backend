@@ -53,4 +53,3 @@ const updatePromptTemplate = async (req, res) => {
     }
 };
 exports.updatePromptTemplate = updatePromptTemplate;
-//# sourceMappingURL=promptController.js.map

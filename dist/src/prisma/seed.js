@@ -70,4 +70,3 @@ main()
     .finally(async () => {
     await index_1.prisma.$disconnect();
 });
-//# sourceMappingURL=seed.js.map

@@ -47,4 +47,3 @@ exports.lessonController = {
         }
     }
 };
-//# sourceMappingURL=lessonController.js.map

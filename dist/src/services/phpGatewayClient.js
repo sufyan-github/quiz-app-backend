@@ -47,4 +47,3 @@ exports.phpGatewayClient = {
         }
     }
 };
-//# sourceMappingURL=phpGatewayClient.js.map

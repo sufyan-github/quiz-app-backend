@@ -3,8 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getNotifications = exports.sendNotification = void 0;
+exports.deleteMyNotification = exports.markAllMyNotificationsRead = exports.markMyNotificationRead = exports.getMyNotifications = exports.getNotifications = exports.sendNotification = void 0;
 const prisma_1 = __importDefault(require("../prisma"));
+const realtimeService_1 = require("../services/realtimeService");
 const sendNotification = async (req, res) => {
     try {
         const { title, message, target, userId } = req.body;
@@ -28,6 +29,7 @@ const sendNotification = async (req, res) => {
                     message
                 }))
             });
+            realtimeService_1.realtimeService.emit('notifications', 'notification_created', { target: 'all' });
             // Log activity
             await prisma_1.default.activityLog.create({
                 data: {
@@ -51,6 +53,7 @@ const sendNotification = async (req, res) => {
                 message
             }
         });
+        realtimeService_1.realtimeService.emit('notifications', 'notification_created', { notification }, userId);
         // Log activity
         await prisma_1.default.activityLog.create({
             data: {
@@ -74,8 +77,8 @@ const getNotifications = async (req, res) => {
             orderBy: { createdAt: 'desc' },
             include: {
                 user: {
-                    include: { profile: true }
-                }
+                    select: { id: true, email: true, mobile: true, role: true, profile: true }
+                },
             }
         });
         res.json(notifications);
@@ -86,4 +89,65 @@ const getNotifications = async (req, res) => {
     }
 };
 exports.getNotifications = getNotifications;
-//# sourceMappingURL=notificationController.js.map
+const getMyNotifications = async (req, res) => {
+    const userId = req.user?.userId;
+    if (!userId) {
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+    }
+    try {
+        const notifications = await prisma_1.default.notification.findMany({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+        });
+        res.json({ success: true, data: notifications });
+    }
+    catch {
+        res.status(500).json({ success: false, message: 'Failed to fetch notifications' });
+    }
+};
+exports.getMyNotifications = getMyNotifications;
+const markMyNotificationRead = async (req, res) => {
+    const userId = req.user?.userId;
+    const id = req.params.id;
+    if (!userId) {
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+    }
+    const result = await prisma_1.default.notification.updateMany({ where: { id, userId }, data: { isRead: true } });
+    if (result.count === 0) {
+        res.status(404).json({ success: false, message: 'Notification not found' });
+        return;
+    }
+    realtimeService_1.realtimeService.emit('notifications', 'notification_updated', { notificationId: id, isRead: true }, userId);
+    res.json({ success: true });
+};
+exports.markMyNotificationRead = markMyNotificationRead;
+const markAllMyNotificationsRead = async (req, res) => {
+    const userId = req.user?.userId;
+    if (!userId) {
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+    }
+    const result = await prisma_1.default.notification.updateMany({ where: { userId, isRead: false }, data: { isRead: true } });
+    realtimeService_1.realtimeService.emit('notifications', 'notifications_read', { count: result.count }, userId);
+    res.json({ success: true, data: { updated: result.count } });
+};
+exports.markAllMyNotificationsRead = markAllMyNotificationsRead;
+const deleteMyNotification = async (req, res) => {
+    const userId = req.user?.userId;
+    const id = req.params.id;
+    if (!userId) {
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+    }
+    const result = await prisma_1.default.notification.deleteMany({ where: { id, userId } });
+    if (result.count === 0) {
+        res.status(404).json({ success: false, message: 'Notification not found' });
+        return;
+    }
+    realtimeService_1.realtimeService.emit('notifications', 'notification_deleted', { notificationId: id }, userId);
+    res.json({ success: true });
+};
+exports.deleteMyNotification = deleteMyNotification;

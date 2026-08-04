@@ -17,4 +17,3 @@ router.post('/topics', authMiddleware_1.authenticate, authMiddleware_1.requireAd
 router.put('/topics/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.updateTopic);
 router.delete('/topics/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, categoryController_1.deleteTopic);
 exports.default = router;
-//# sourceMappingURL=categoryRoutes.js.map

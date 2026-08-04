@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import prisma from '../prisma';
+import { realtimeService } from '../services/realtimeService';
 
 export const sendNotification = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -30,6 +31,8 @@ export const sendNotification = async (req: AuthRequest, res: Response): Promise
         }))
       });
 
+      realtimeService.emit('notifications', 'notification_created', { target: 'all' });
+
       // Log activity
       await prisma.activityLog.create({
         data: {
@@ -56,6 +59,7 @@ export const sendNotification = async (req: AuthRequest, res: Response): Promise
         message
       }
     });
+    realtimeService.emit('notifications', 'notification_created', { notification }, userId);
 
     // Log activity
     await prisma.activityLog.create({
@@ -80,8 +84,8 @@ export const getNotifications = async (req: AuthRequest, res: Response): Promise
       orderBy: { createdAt: 'desc' },
       include: {
         user: {
-          include: { profile: true }
-        }
+          select: { id: true, email: true, mobile: true, role: true, profile: true }
+        },
       }
     });
     res.json(notifications);
@@ -89,4 +93,51 @@ export const getNotifications = async (req: AuthRequest, res: Response): Promise
     console.error('Get notifications error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+};
+
+export const getMyNotifications = async (req: AuthRequest, res: Response): Promise<void> => {
+  const userId = req.user?.userId;
+  if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
+
+  try {
+    const notifications = await prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    res.json({ success: true, data: notifications });
+  } catch {
+    res.status(500).json({ success: false, message: 'Failed to fetch notifications' });
+  }
+};
+
+export const markMyNotificationRead = async (req: AuthRequest, res: Response): Promise<void> => {
+  const userId = req.user?.userId;
+  const id = req.params.id as string;
+  if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
+
+  const result = await prisma.notification.updateMany({ where: { id, userId }, data: { isRead: true } });
+  if (result.count === 0) { res.status(404).json({ success: false, message: 'Notification not found' }); return; }
+  realtimeService.emit('notifications', 'notification_updated', { notificationId: id, isRead: true }, userId);
+  res.json({ success: true });
+};
+
+export const markAllMyNotificationsRead = async (req: AuthRequest, res: Response): Promise<void> => {
+  const userId = req.user?.userId;
+  if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
+
+  const result = await prisma.notification.updateMany({ where: { userId, isRead: false }, data: { isRead: true } });
+  realtimeService.emit('notifications', 'notifications_read', { count: result.count }, userId);
+  res.json({ success: true, data: { updated: result.count } });
+};
+
+export const deleteMyNotification = async (req: AuthRequest, res: Response): Promise<void> => {
+  const userId = req.user?.userId;
+  const id = req.params.id as string;
+  if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
+
+  const result = await prisma.notification.deleteMany({ where: { id, userId } });
+  if (result.count === 0) { res.status(404).json({ success: false, message: 'Notification not found' }); return; }
+  realtimeService.emit('notifications', 'notification_deleted', { notificationId: id }, userId);
+  res.json({ success: true });
 };

@@ -11,11 +11,12 @@ exports.aiService = {
         const systemPrompt = template?.systemPrompt ||
             "You are an expert, encouraging AI tutor. Explain concepts simply with analogies and code examples if relevant.";
         const response = await openai_1.openai.chat.completions.create({
-            model: template?.model || 'gpt-4o',
+            model: template?.model || 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: prompt }
             ],
+            max_tokens: 800,
         });
         const answer = response.choices[0].message.content || '';
         await prisma_1.prisma.aiConversation.create({
@@ -36,7 +37,7 @@ exports.aiService = {
             where: { id: questionId },
             include: { options: true }
         });
-        if (!question) {
+        if (!question || (question.status === 'PRIVATE' && question.createdById !== userId)) {
             throw new Error('Question not found');
         }
         const prompt = `Generate a short, helpful hint for this question without giving away the direct answer.
@@ -48,6 +49,7 @@ exports.aiService = {
                 { role: 'system', content: "You are a helpful tutor. Give a tiny hint that nudges the student in the right direction without revealing the exact answer." },
                 { role: 'user', content: prompt }
             ],
+            max_tokens: 180,
         });
         const hint = response.choices[0].message.content || '';
         await prisma_1.prisma.aiFeedback.create({
@@ -76,8 +78,12 @@ exports.aiService = {
         }
         const subjectName = topic.subject?.name || 'General';
         const categoryName = topic.subject?.category?.name || 'General';
-        const targetLanguage = language || 'english';
-        let prompt = `Generate ${count || 5} multiple choice questions about the topic "${topic.name}" under the subject "${subjectName}" and category "${categoryName}" at a ${difficulty || 'MEDIUM'} difficulty.
+        const targetLanguage = language === 'bangla' ? 'bangla' : 'english';
+        const safeDifficulty = ['EASY', 'MEDIUM', 'HARD'].includes(String(difficulty).toUpperCase())
+            ? String(difficulty).toUpperCase()
+            : 'MEDIUM';
+        const safeCount = Math.min(50, Math.max(1, Math.floor(Number(count) || 5)));
+        let prompt = `Generate ${safeCount} multiple choice questions about the topic "${topic.name}" under the subject "${subjectName}" and category "${categoryName}" at a ${safeDifficulty} difficulty.
     Make sure the context is strictly relevant to the subject "${subjectName}" (e.g. if the subject is "Bangladesh Affairs" or "Bangladesh", questions must strictly focus on Bangladesh context rather than general global context).
     
     Language Requirement: The entire generated content (the question "text", the choice "text"s inside "options", and the "explanation") MUST be written strictly in the ${targetLanguage} language. E.g., if language is "bangla", write everything in Bangla (Bengali script).
@@ -98,15 +104,19 @@ exports.aiService = {
             prompt += `\n\nExtra guidelines/directives provided by administrator: ${adminPrompt}`;
         }
         const response = await openai_1.openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: "You are a JSON quiz generator API. Output ONLY raw JSON, no markdown formatting." },
                 { role: 'user', content: prompt }
             ],
+            max_tokens: Math.min(8000, 500 + safeCount * 180),
         });
         let jsonString = response.choices[0].message.content || '[]';
         jsonString = jsonString.replace(/```json/g, '').replace(/```/g, '').trim();
         const questionsPayload = JSON.parse(jsonString);
+        if (!Array.isArray(questionsPayload) || questionsPayload.length === 0 || questionsPayload.length > safeCount) {
+            throw new Error('AI returned an invalid question set');
+        }
         const generated = await prisma_1.prisma.aiGeneratedQuestion.create({
             data: {
                 topicId: topic.id,
@@ -118,4 +128,3 @@ exports.aiService = {
         return generated;
     }
 };
-//# sourceMappingURL=aiService.js.map

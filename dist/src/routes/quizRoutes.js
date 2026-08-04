@@ -12,7 +12,7 @@ router.get('/quiz-config', quizController_1.quizController.getQuizConfig);
 router.use(authMiddleware_1.authenticate);
 router.get('/categories', quizController_1.quizController.getCategories);
 router.get('/generate', quizController_1.quizController.generateQuiz);
-router.post('/submit', quizController_1.quizController.submitQuiz);
+router.post('/submit', quizController_1.quizController.submitQuizV2);
 router.get('/dashboard', quizController_1.quizController.getDashboard);
 router.get('/leaderboard', quizController_1.quizController.getLeaderboard);
 // Exam History
@@ -22,4 +22,3 @@ router.get('/history/:id/pdf', quizController_1.quizController.downloadPdfReport
 // Daily Reward
 router.post('/daily-reward', quizController_1.quizController.claimDailyReward);
 exports.default = router;
-//# sourceMappingURL=quizRoutes.js.map

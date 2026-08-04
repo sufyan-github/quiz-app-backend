@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 
+const recentlyUsedNonces = new Map<string, number>();
+
 // Verifies requests from php_bdapps_gateway/api/callback.php, using the
 // exact same HMAC scheme phpGatewayClient.ts already uses for Node->PHP
 // calls (see Security.php for the PHP-side twin of this check), just in
@@ -32,6 +34,17 @@ export function verifyPhpWebhookSignature(req: Request, res: Response, next: Nex
     return;
   }
 
+  if (!/^[a-f0-9]{32}$/i.test(nonce)) {
+    res.status(403).json({ statusCode: 'FAILED', message: 'Invalid nonce' });
+    return;
+  }
+
+  const nonceExpiry = recentlyUsedNonces.get(nonce);
+  if (nonceExpiry && nonceExpiry > Date.now()) {
+    res.status(409).json({ statusCode: 'FAILED', message: 'Request nonce already used' });
+    return;
+  }
+
   if (apiKey !== INTERNAL_API_KEY) {
     res.status(403).json({ statusCode: 'FAILED', message: 'Invalid API key' });
     return;
@@ -54,6 +67,11 @@ export function verifyPhpWebhookSignature(req: Request, res: Response, next: Nex
   if (!validSignature) {
     res.status(403).json({ statusCode: 'FAILED', message: 'Invalid signature' });
     return;
+  }
+
+  recentlyUsedNonces.set(nonce, Date.now() + 10 * 60_000);
+  for (const [usedNonce, expiresAt] of recentlyUsedNonces.entries()) {
+    if (expiresAt <= Date.now()) recentlyUsedNonces.delete(usedNonce);
   }
 
   next();

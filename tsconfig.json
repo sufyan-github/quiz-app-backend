@@ -13,9 +13,9 @@
     // "lib": ["esnext"],
 
     // Other Outputs
-    "sourceMap": true,
-    "declaration": true,
-    "declarationMap": true,
+    "sourceMap": false,
+    "declaration": false,
+    "declarationMap": false,
 
     // Stricter Typechecking Options
     "noUncheckedIndexedAccess": true,
@@ -36,5 +36,6 @@
     "skipLibCheck": true,
     "outDir": "./dist",
     "rootDir": "./"
-  }
+  },
+  "exclude": ["dist", "node_modules", "src/__tests__"]
 }

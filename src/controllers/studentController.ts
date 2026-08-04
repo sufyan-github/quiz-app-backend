@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import prisma from '../prisma';
+import { sanitizeProfileInput } from '../utils/profileInput';
+import type { Prisma } from '@prisma/client';
 
 export const getStudentProfile = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -12,11 +14,22 @@ export const getStudentProfile = async (req: AuthRequest, res: Response): Promis
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { 
+      select: {
+        id: true,
+        email: true,
+        mobile: true,
+        role: true,
+        subscription_status: true,
+        coins: true,
+        xp: true,
+        level: true,
+        streak: true,
+        createdAt: true,
+        updatedAt: true,
         profile: true,
         settings: true,
-        achievements: { include: { achievement: true } }
-      }
+        achievements: { include: { achievement: true } },
+      },
     });
 
     if (!user) {
@@ -39,15 +52,19 @@ export const updateStudentProfile = async (req: AuthRequest, res: Response): Pro
       return;
     }
 
-    const data = req.body;
+    const data = sanitizeProfileInput(req.body);
+    if (Object.keys(data).length === 0) {
+      res.status(400).json({ error: 'No valid profile fields supplied' });
+      return;
+    }
     
     const profile = await prisma.profile.upsert({
       where: { userId },
-      update: data,
+      update: data as Prisma.ProfileUncheckedUpdateInput,
       create: {
         userId,
         ...data,
-      }
+      } as Prisma.ProfileUncheckedCreateInput,
     });
 
     await prisma.activityLog.create({
@@ -89,10 +106,10 @@ export const getStudentDashboard = async (req: AuthRequest, res: Response): Prom
       totalAccuracy = results.reduce((acc, r) => acc + r.accuracy, 0) / results.length;
     }
 
-    // Dummy values for XP, Coins, Streak for now (would be calculated or stored in DB in real app)
-    const xpPoints = completedExams * 50;
-    const coins = completedExams * 10;
-    const currentStreak = 3;
+    const user = userId ? await prisma.user.findUnique({
+      where: { id: userId },
+      select: { xp: true, coins: true, streak: true },
+    }) : null;
 
     res.json({
       summary: {
@@ -100,9 +117,9 @@ export const getStudentDashboard = async (req: AuthRequest, res: Response): Prom
         pendingExams,
         averageScore: results.length > 0 ? (totalScore / results.length).toFixed(2) : 0,
         overallAccuracy: totalAccuracy.toFixed(2),
-        xpPoints,
-        coins,
-        currentStreak
+        xpPoints: user?.xp ?? 0,
+        coins: user?.coins ?? 0,
+        currentStreak: user?.streak ?? 0,
       }
     });
   } catch (error) {

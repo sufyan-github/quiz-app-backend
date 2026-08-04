@@ -21,9 +21,12 @@ router.get('/coupons', adminController_1.getAdminCoupons);
 router.post('/coupons', adminController_1.createAdminCoupon);
 router.get('/sms-config', adminController_1.getAdminSmsConfig);
 router.put('/sms-config', adminController_1.updateAdminSmsConfig);
+router.get('/sms-logs', adminController_1.getAdminSmsLogs);
 router.get('/subscriptions', adminController_1.getAdminSubscriptions);
 router.get('/payment-logs', adminController_1.getAdminPaymentLogs);
 router.get('/subscription-analytics', adminController_1.getAdminSubscriptionAnalytics);
+router.get('/quiz-config', adminController_1.getAdminQuizConfigs);
+router.post('/quiz-config', adminController_1.upsertAdminQuizConfig);
 // User & Role Management
 router.get('/users', adminController_1.getAdminUsers);
 router.put('/users/:id/role', authMiddleware_1.requireSuperAdmin, adminController_1.updateUserRole);
@@ -34,4 +37,3 @@ router.get('/notifications', notificationController_1.getNotifications);
 router.get('/prompts', promptController_1.getPromptTemplates);
 router.put('/prompts/:id', promptController_1.updatePromptTemplate);
 exports.default = router;
-//# sourceMappingURL=adminRoutes.js.map

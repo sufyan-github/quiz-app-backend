@@ -8,12 +8,12 @@ const router = (0, express_1.Router)();
 router.get('/results/all', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, examController_1.getAllResults);
 router.post('/:examId/questions', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, examController_1.addQuestionToExam);
 router.delete('/questions/:questionId', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, examController_1.deleteQuestion);
-router.get('/', examController_1.getExams);
+router.get('/', authMiddleware_1.authenticate, examController_1.getExams);
 router.post('/', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, examController_1.createExam);
 router.put('/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, examController_1.updateExam);
 router.delete('/:id', authMiddleware_1.authenticate, authMiddleware_1.requireAdmin, examController_1.deleteExam);
+router.post('/:id/start', authMiddleware_1.authenticate, examController_1.startExam);
 router.post('/answer', authMiddleware_1.authenticate, examController_1.saveAnswer);
 router.post('/submit', authMiddleware_1.authenticate, examController_1.submitExam);
 router.get('/certificate/:attemptId', authMiddleware_1.authenticate, examController_1.generateCertificate);
 exports.default = router;
-//# sourceMappingURL=examRoutes.js.map

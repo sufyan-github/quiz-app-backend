@@ -7,6 +7,6 @@ const router = (0, express_1.Router)();
 router.use(authMiddleware_1.authenticate);
 router.get('/profile', studentController_1.getStudentProfile);
 router.put('/profile', studentController_1.updateStudentProfile);
+router.patch('/profile', studentController_1.updateStudentProfile);
 router.get('/dashboard', studentController_1.getStudentDashboard);
 exports.default = router;
-//# sourceMappingURL=studentRoutes.js.map

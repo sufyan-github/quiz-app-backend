@@ -3,15 +3,31 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAdminSubscriptionAnalytics = exports.getAdminPaymentLogs = exports.getAdminSubscriptions = exports.updateAdminSmsConfig = exports.getAdminSmsConfig = exports.createAdminCoupon = exports.getAdminCoupons = exports.deleteAdminPlan = exports.createAdminPlan = exports.getAdminPlans = exports.getAdminRevenue = exports.getAdminActivityLogs = exports.getAdminDashboard = exports.updateAdminProfile = exports.getAdminProfile = exports.createAdminUser = exports.updateUserRole = exports.getAdminUsers = void 0;
+exports.upsertAdminQuizConfig = exports.getAdminQuizConfigs = exports.getAdminSubscriptionAnalytics = exports.getAdminPaymentLogs = exports.getAdminSubscriptions = exports.getAdminSmsLogs = exports.updateAdminSmsConfig = exports.getAdminSmsConfig = exports.createAdminCoupon = exports.getAdminCoupons = exports.deleteAdminPlan = exports.createAdminPlan = exports.getAdminPlans = exports.getAdminRevenue = exports.getAdminActivityLogs = exports.getAdminDashboard = exports.updateAdminProfile = exports.getAdminProfile = exports.createAdminUser = exports.updateUserRole = exports.getAdminUsers = void 0;
 const prisma_1 = __importDefault(require("../prisma"));
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const realtimeService_1 = require("../services/realtimeService");
+const profileInput_1 = require("../utils/profileInput");
+const safeUserSelect = {
+    id: true,
+    email: true,
+    mobile: true,
+    role: true,
+    subscription_status: true,
+    coins: true,
+    xp: true,
+    level: true,
+    streak: true,
+    createdAt: true,
+    updatedAt: true,
+    profile: true,
+};
 const getAdminUsers = async (req, res) => {
     try {
         const users = await prisma_1.default.user.findMany({
+            where: { deletedAt: null },
             orderBy: { createdAt: 'desc' },
-            include: { profile: true }
+            select: safeUserSelect,
         });
         res.json(users);
     }
@@ -28,20 +44,36 @@ const updateUserRole = async (req, res) => {
             res.status(400).json({ error: 'Invalid role' });
             return;
         }
+        const target = await prisma_1.default.user.findUnique({ where: { id }, select: { role: true, deletedAt: true } });
+        if (!target || target.deletedAt) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+        if (id === req.user?.userId && role !== 'SUPER_ADMIN') {
+            res.status(409).json({ error: 'You cannot remove your own super-admin access' });
+            return;
+        }
+        if (target.role === 'SUPER_ADMIN' && role !== 'SUPER_ADMIN') {
+            const superAdminCount = await prisma_1.default.user.count({ where: { role: 'SUPER_ADMIN', deletedAt: null } });
+            if (superAdminCount <= 1) {
+                res.status(409).json({ error: 'At least one super admin must remain' });
+                return;
+            }
+        }
         const updated = await prisma_1.default.user.update({
             where: { id },
             data: { role },
-            include: { profile: true }
+            select: safeUserSelect,
         });
         await prisma_1.default.activityLog.create({
             data: {
                 userId: req.user?.userId || '',
-                action: `Updated User ${updated.email} Role to ${role}`,
+                action: `Updated user ${updated.id} role to ${role}`,
                 module: 'UserManagement',
                 ipAddress: req.ip
             }
         });
-        realtimeService_1.realtimeService.emit('profile', 'user_updated', { userId: id, role, updated }, id);
+        realtimeService_1.realtimeService.emit('profile', 'user_updated', { userId: id, role }, id);
         res.json(updated);
     }
     catch (error) {
@@ -51,9 +83,18 @@ const updateUserRole = async (req, res) => {
 exports.updateUserRole = updateUserRole;
 const createAdminUser = async (req, res) => {
     try {
-        const { email, password, name, role } = req.body;
-        if (!email || !password) {
-            res.status(400).json({ error: 'Missing parameters' });
+        const email = String(req.body.email || '').trim().toLowerCase();
+        const password = req.body.password;
+        const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+        const targetRole = req.body.role === 'INSTRUCTOR' ? 'INSTRUCTOR' : 'ADMIN';
+        const validPassword = typeof password === 'string'
+            && password.length >= 12
+            && password.length <= 128
+            && /[a-z]/.test(password)
+            && /[A-Z]/.test(password)
+            && /\d/.test(password);
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !validPassword) {
+            res.status(400).json({ error: 'Use a valid email and a strong 12-128 character password' });
             return;
         }
         const existingUser = await prisma_1.default.user.findUnique({ where: { email } });
@@ -61,8 +102,7 @@ const createAdminUser = async (req, res) => {
             res.status(400).json({ error: 'User already exists' });
             return;
         }
-        const hashedPassword = await bcrypt_1.default.hash(password, 10);
-        const targetRole = role || 'ADMIN';
+        const hashedPassword = await bcrypt_1.default.hash(password, 12);
         const user = await prisma_1.default.user.create({
             data: {
                 email,
@@ -72,17 +112,17 @@ const createAdminUser = async (req, res) => {
                     create: { name: name || 'Admin User' }
                 }
             },
-            include: { profile: true }
+            select: safeUserSelect,
         });
         await prisma_1.default.activityLog.create({
             data: {
                 userId: req.user?.userId || '',
-                action: `Created Admin User ${email}`,
+                action: `Created ${targetRole.toLowerCase()} user ${user.id}`,
                 module: 'UserManagement',
                 ipAddress: req.ip
             }
         });
-        realtimeService_1.realtimeService.emit('profile', 'user_created', { user });
+        realtimeService_1.realtimeService.emit('profile', 'user_created', { userId: user.id, role: user.role });
         res.status(201).json(user);
     }
     catch (error) {
@@ -100,10 +140,7 @@ const getAdminProfile = async (req, res) => {
         }
         const user = await prisma_1.default.user.findUnique({
             where: { id: userId },
-            include: {
-                profile: true,
-                settings: true
-            }
+            select: { ...safeUserSelect, settings: true },
         });
         if (!user) {
             res.status(404).json({ error: 'User not found' });
@@ -124,14 +161,18 @@ const updateAdminProfile = async (req, res) => {
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-        const data = req.body;
+        const data = (0, profileInput_1.sanitizeProfileInput)(req.body);
+        if (Object.keys(data).length === 0) {
+            res.status(400).json({ error: 'No valid profile fields supplied' });
+            return;
+        }
         const profile = await prisma_1.default.profile.upsert({
             where: { userId },
             update: data,
             create: {
                 userId,
                 ...data,
-            }
+            },
         });
         // Log Activity
         await prisma_1.default.activityLog.create({
@@ -162,7 +203,7 @@ const getAdminDashboard = async (req, res) => {
         const recentActivity = await prisma_1.default.activityLog.findMany({
             take: 10,
             orderBy: { createdAt: 'desc' },
-            include: { user: { include: { profile: true } } }
+            include: { user: { select: safeUserSelect } },
         });
         res.json({
             summary: {
@@ -184,7 +225,7 @@ const getAdminActivityLogs = async (req, res) => {
     try {
         const logs = await prisma_1.default.activityLog.findMany({
             orderBy: { createdAt: 'desc' },
-            include: { user: { include: { profile: true } } }
+            include: { user: { select: safeUserSelect } },
         });
         res.json(logs);
     }
@@ -252,7 +293,7 @@ const getAdminRevenue = async (req, res) => {
             transactions: await prisma_1.default.transaction.findMany({
                 orderBy: { createdAt: 'desc' },
                 take: 30,
-                include: { user: { include: { profile: true } } }
+                include: { user: { select: safeUserSelect } },
             }),
             monthlyData
         });
@@ -384,6 +425,16 @@ const updateAdminSmsConfig = async (req, res) => {
     }
 };
 exports.updateAdminSmsConfig = updateAdminSmsConfig;
+const getAdminSmsLogs = async (req, res) => {
+    const page = Math.max(1, Number.parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || '50'), 10)));
+    const [total, logs] = await Promise.all([
+        prisma_1.default.smsLog.count(),
+        prisma_1.default.smsLog.findMany({ orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+    ]);
+    res.json({ success: true, data: logs, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+};
+exports.getAdminSmsLogs = getAdminSmsLogs;
 // ==========================================
 // SUBSCRIPTION MANAGEMENT (BDApps + generic plans)
 // ==========================================
@@ -444,7 +495,7 @@ const getAdminPaymentLogs = async (req, res) => {
                 orderBy: { createdAt: 'desc' },
                 skip: (page - 1) * limit,
                 take: limit,
-                include: { user: { include: { profile: true } } },
+                include: { user: { select: safeUserSelect } },
             }),
             prisma_1.default.webhookLog.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }),
         ]);
@@ -512,4 +563,36 @@ const getAdminSubscriptionAnalytics = async (req, res) => {
     }
 };
 exports.getAdminSubscriptionAnalytics = getAdminSubscriptionAnalytics;
-//# sourceMappingURL=adminController.js.map
+const getAdminQuizConfigs = async (_req, res) => {
+    const configs = await prisma_1.default.subjectQuizConfig.findMany({ orderBy: { subjectName: 'asc' } });
+    res.json({ success: true, data: configs });
+};
+exports.getAdminQuizConfigs = getAdminQuizConfigs;
+const upsertAdminQuizConfig = async (req, res) => {
+    const subjectName = String(req.body.subjectName || '').trim();
+    const defaultQuestions = Math.floor(Number(req.body.defaultQuestions));
+    const defaultTimeMins = Math.floor(Number(req.body.defaultTimeMins));
+    const defaultPassingPct = Number(req.body.defaultPassingPct);
+    const marksPerQuestion = Number(req.body.marksPerQuestion);
+    const negativeMarksDefault = Number(req.body.negativeMarksDefault);
+    if (!subjectName || subjectName.length > 100
+        || !Number.isInteger(defaultQuestions) || defaultQuestions < 1 || defaultQuestions > 200
+        || !Number.isInteger(defaultTimeMins) || defaultTimeMins < 1 || defaultTimeMins > 300
+        || !Number.isFinite(defaultPassingPct) || defaultPassingPct < 0 || defaultPassingPct > 100
+        || !Number.isFinite(marksPerQuestion) || marksPerQuestion <= 0 || marksPerQuestion > 100
+        || !Number.isFinite(negativeMarksDefault) || negativeMarksDefault < 0 || negativeMarksDefault > marksPerQuestion) {
+        res.status(400).json({ success: false, message: 'Invalid quiz configuration' });
+        return;
+    }
+    const config = await prisma_1.default.subjectQuizConfig.upsert({
+        where: { subjectName: subjectName.toLowerCase() },
+        update: { defaultQuestions, defaultTimeMins, defaultPassingPct, marksPerQuestion, negativeMarksDefault },
+        create: {
+            subjectName: subjectName.toLowerCase(), defaultQuestions, defaultTimeMins,
+            defaultPassingPct, marksPerQuestion, negativeMarksDefault,
+        },
+    });
+    realtimeService_1.realtimeService.emit('app_config', 'quiz_config_updated', { subjectName: config.subjectName });
+    res.json({ success: true, data: config });
+};
+exports.upsertAdminQuizConfig = upsertAdminQuizConfig;

@@ -164,65 +164,63 @@ exports.subscriptionController = {
     async handleWebhook(req, res) {
         const payload = req.body || {};
         const subscriberId = payload.subscriberId;
-        const status = payload.status;
-        const mobile = subscriberId ? subscriberId.replace(/^tel:88/, '') : undefined;
-        // Idempotency: BDApps (or any webhook sender) may redeliver the same
-        // event. Hash the payload + a coarse time bucket so an identical
-        // redelivery within the same minute is a no-op, not a double-write.
-        const timeBucket = Math.floor(Date.now() / 60000);
+        const status = payload.status === 'REGISTERED' ? 'REGISTERED' : payload.status === 'UNSUBSCRIBED' ? 'UNSUBSCRIBED' : undefined;
+        const mobile = subscriberId && /^tel:8801[3-9][0-9]{8}$/.test(subscriberId)
+            ? subscriberId.replace(/^tel:88/, '')
+            : undefined;
+        if (!mobile || !status) {
+            res.status(400).json({ statusCode: 'FAILED', statusDetail: 'Invalid verified webhook payload' });
+            return;
+        }
+        // Use the provider event identifier when available. Otherwise hash the
+        // verified payload; identical redeliveries remain idempotent forever.
         const idempotencyKey = crypto_1.default
             .createHash('sha256')
-            .update(`${subscriberId ?? ''}:${status ?? ''}:${timeBucket}`)
+            .update(String(payload.providerEventId || JSON.stringify(payload)))
             .digest('hex');
         const alreadySeen = await prisma_1.prisma.webhookLog.findUnique({ where: { idempotencyKey } });
         if (alreadySeen) {
             res.json({ statusCode: 'S1000', statusDetail: 'Already processed (duplicate delivery)' });
             return;
         }
-        let processingNote = 'ok';
-        let processed = false;
         try {
-            if (mobile && status) {
-                const user = await prisma_1.prisma.user.findUnique({ where: { mobile } });
-                if (user) {
-                    await (0, subscriptionSync_1.syncBdappsSubscription)({ userId: user.id, status, referenceNo: null, source: 'WEBHOOK' });
-                    realtimeService_1.realtimeService.emit('subscription', 'premium_status_changed', { subscriptionStatus: status }, user.id);
-                    await prisma_1.prisma.notification.create({
-                        data: {
-                            userId: user.id,
-                            title: status === 'REGISTERED' ? 'Subscription activated' : 'Subscription ended',
-                            message: status === 'REGISTERED'
-                                ? 'Your Quiz AI subscription is now active. All premium features are unlocked.'
-                                : 'Your Quiz AI subscription has ended.',
-                        },
-                    });
-                    processed = true;
-                }
-                else {
-                    processingNote = `no user found for mobile ${mobile}`;
-                }
+            const user = await prisma_1.prisma.user.findUnique({ where: { mobile } });
+            if (!user) {
+                await prisma_1.prisma.webhookLog.create({
+                    data: {
+                        source: 'BDAPPS', subscriberId, mobile, rawPayload: payload,
+                        receivedStatus: status, signatureValid: true, processed: false,
+                        processingNote: 'no matching user', idempotencyKey,
+                    },
+                });
+                res.status(404).json({ statusCode: 'FAILED', statusDetail: 'Subscriber is not linked to an account' });
+                return;
             }
-            else {
-                processingNote = 'missing subscriberId or status in payload';
-            }
+            await (0, subscriptionSync_1.syncBdappsSubscription)({ userId: user.id, status, referenceNo: null, source: 'WEBHOOK' });
+            const notification = await prisma_1.prisma.notification.create({
+                data: {
+                    userId: user.id,
+                    title: status === 'REGISTERED' ? 'Subscription activated' : 'Subscription ended',
+                    message: status === 'REGISTERED'
+                        ? 'Your Quiz AI subscription is now active. All premium features are unlocked.'
+                        : 'Your Quiz AI subscription has ended.',
+                },
+            });
+            await prisma_1.prisma.webhookLog.create({
+                data: {
+                    source: 'BDAPPS', subscriberId, mobile, rawPayload: payload,
+                    receivedStatus: status, signatureValid: true, processed: true,
+                    processingNote: 'ok', idempotencyKey,
+                },
+            });
+            realtimeService_1.realtimeService.emit('premium', 'premium_status_changed', { subscriptionStatus: status }, user.id);
+            realtimeService_1.realtimeService.emit('notifications', 'notification_created', { notification }, user.id);
         }
         catch (error) {
-            processingNote = `error: ${error.message}`;
+            console.error('Subscription webhook processing failed:', error.message);
+            res.status(500).json({ statusCode: 'RETRY', statusDetail: 'Webhook processing failed' });
+            return;
         }
-        await prisma_1.prisma.webhookLog.create({
-            data: {
-                source: 'BDAPPS',
-                subscriberId: subscriberId ?? null,
-                mobile: mobile ?? null,
-                rawPayload: payload,
-                receivedStatus: status ?? null,
-                signatureValid: true, // this handler only runs after signature middleware passes
-                processed,
-                processingNote,
-                idempotencyKey,
-            },
-        });
         res.json({ statusCode: 'S1000', statusDetail: 'Success' });
     },
 };
-//# sourceMappingURL=subscriptionController.js.map

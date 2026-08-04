@@ -11,4 +11,3 @@ exports.default = (0, config_1.defineConfig)({
         url: process.env.DATABASE_URL,
     },
 });
-//# sourceMappingURL=prisma.config.js.map

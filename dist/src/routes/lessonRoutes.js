@@ -8,4 +8,3 @@ router.use(authMiddleware_1.authenticate);
 router.get('/', lessonController_1.lessonController.getLessons);
 router.get('/:id', lessonController_1.lessonController.getLesson);
 exports.default = router;
-//# sourceMappingURL=lessonRoutes.js.map

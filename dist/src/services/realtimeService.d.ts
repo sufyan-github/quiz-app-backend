@@ -6,6 +6,7 @@ export interface ModuleVersion {
 }
 declare class RealtimeService {
     private io;
+    private readonly initialVersion;
     private moduleVersions;
     init(httpServer: HttpServer): SocketIOServer;
     /**

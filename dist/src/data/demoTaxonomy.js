@@ -81,4 +81,3 @@ function sanitizeFreeText(input, maxLen) {
 function resolveCategory(categoryKey) {
     return exports.demoTaxonomy[categoryKey] || null;
 }
-//# sourceMappingURL=demoTaxonomy.js.map

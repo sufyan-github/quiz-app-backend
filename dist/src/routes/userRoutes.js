@@ -3,12 +3,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const userController_1 = require("../controllers/userController");
 const authMiddleware_1 = require("../middleware/authMiddleware");
+const notificationController_1 = require("../controllers/notificationController");
+const accountController_1 = require("../controllers/accountController");
 const router = (0, express_1.Router)();
 router.use(authMiddleware_1.authenticate);
 router.get('/profile', userController_1.getProfile);
 router.put('/profile', userController_1.updateProfile);
+router.get('/notifications', notificationController_1.getMyNotifications);
+router.patch('/notifications/read-all', notificationController_1.markAllMyNotificationsRead);
+router.patch('/notifications/:id/read', notificationController_1.markMyNotificationRead);
+router.delete('/notifications/:id', notificationController_1.deleteMyNotification);
+router.get('/account/export', accountController_1.exportMyData);
+router.post('/account/delete', accountController_1.deleteMyAccount);
 // Admin routes
 router.get('/all', authMiddleware_1.requireAdmin, userController_1.getAllUsers);
 router.get('/:id', authMiddleware_1.requireAdmin, userController_1.getUserDetails);
 exports.default = router;
-//# sourceMappingURL=userRoutes.js.map

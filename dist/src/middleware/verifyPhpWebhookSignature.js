@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.verifyPhpWebhookSignature = verifyPhpWebhookSignature;
 const crypto_1 = __importDefault(require("crypto"));
+const recentlyUsedNonces = new Map();
 // Verifies requests from php_bdapps_gateway/api/callback.php, using the
 // exact same HMAC scheme phpGatewayClient.ts already uses for Node->PHP
 // calls (see Security.php for the PHP-side twin of this check), just in
@@ -33,6 +34,15 @@ function verifyPhpWebhookSignature(req, res, next) {
         res.status(403).json({ statusCode: 'FAILED', message: 'Missing required security headers' });
         return;
     }
+    if (!/^[a-f0-9]{32}$/i.test(nonce)) {
+        res.status(403).json({ statusCode: 'FAILED', message: 'Invalid nonce' });
+        return;
+    }
+    const nonceExpiry = recentlyUsedNonces.get(nonce);
+    if (nonceExpiry && nonceExpiry > Date.now()) {
+        res.status(409).json({ statusCode: 'FAILED', message: 'Request nonce already used' });
+        return;
+    }
     if (apiKey !== INTERNAL_API_KEY) {
         res.status(403).json({ statusCode: 'FAILED', message: 'Invalid API key' });
         return;
@@ -52,6 +62,10 @@ function verifyPhpWebhookSignature(req, res, next) {
         res.status(403).json({ statusCode: 'FAILED', message: 'Invalid signature' });
         return;
     }
+    recentlyUsedNonces.set(nonce, Date.now() + 10 * 60_000);
+    for (const [usedNonce, expiresAt] of recentlyUsedNonces.entries()) {
+        if (expiresAt <= Date.now())
+            recentlyUsedNonces.delete(usedNonce);
+    }
     next();
 }
-//# sourceMappingURL=verifyPhpWebhookSignature.js.map

@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import prisma from '../prisma';
+import { sanitizeProfileInput } from '../utils/profileInput';
+import type { Prisma } from '@prisma/client';
 
 export const updateProfile = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -10,27 +12,19 @@ export const updateProfile = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const { name, institution, department, semester, phone, avatarUrl, photo } = req.body;
+    const data = sanitizeProfileInput(req.body);
+    if (Object.keys(data).length === 0) {
+      res.status(400).json({ error: 'No valid profile fields supplied' });
+      return;
+    }
 
     const profile = await prisma.profile.upsert({
       where: { userId },
-      update: {
-        name,
-        institution,
-        department,
-        semester,
-        phone,
-        photo: photo || avatarUrl
-      },
+      update: data as Prisma.ProfileUncheckedUpdateInput,
       create: {
         userId,
-        name,
-        institution,
-        department,
-        semester,
-        phone,
-        photo: photo || avatarUrl
-      }
+        ...data,
+      } as Prisma.ProfileUncheckedCreateInput,
     });
 
     res.json(profile);
@@ -50,7 +44,7 @@ export const getProfile = async (req: AuthRequest, res: Response): Promise<void>
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { profile: true }
+      select: { email: true, role: true, profile: true }
     });
 
     if (!user) {
@@ -72,6 +66,7 @@ export const getProfile = async (req: AuthRequest, res: Response): Promise<void>
 export const getAllUsers = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const users = await prisma.user.findMany({
+      where: { deletedAt: null },
       include: { profile: true },
       orderBy: { createdAt: 'desc' }
     });

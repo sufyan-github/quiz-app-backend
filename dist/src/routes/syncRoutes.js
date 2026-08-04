@@ -11,4 +11,3 @@ router.get('/versions', (req, res) => {
     });
 });
 exports.default = router;
-//# sourceMappingURL=syncRoutes.js.map

@@ -11,4 +11,3 @@ router.get('/plans', authMiddleware_1.authenticate, paymentController_1.paymentC
 // Callback receiver (simulates third-party webhook trigger)
 router.post('/simulate-callback', paymentController_1.paymentController.simulateCallback);
 exports.default = router;
-//# sourceMappingURL=paymentRoutes.js.map

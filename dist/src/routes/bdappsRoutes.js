@@ -11,4 +11,3 @@ router.post('/subscription/check', bdappsController_1.bdappsController.checkSubs
 // BDApps Production Webhooks must now be pointed to:
 // https://bdappsdigitalapps.com/api/callback.php
 exports.default = router;
-//# sourceMappingURL=bdappsRoutes.js.map

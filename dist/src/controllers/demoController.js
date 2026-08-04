@@ -1,14 +1,10 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.demoController = void 0;
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const openai_1 = require("../config/openai");
 const prisma_1 = require("../prisma");
-const jwt_1 = require("../config/jwt");
 const demoTaxonomy_1 = require("../data/demoTaxonomy");
+const authService_1 = require("../services/authService");
 // This endpoint is deliberately public (landing-page visitors are not
 // logged in) and therefore cost-bearing without an auth gate. Every
 // safeguard below exists to bound OpenAI spend and abuse, not to be
@@ -188,7 +184,7 @@ Respond with ONLY a raw JSON array (no markdown fences) of exactly 5 objects, ea
                     profile: { create: { name: 'Trial User' } },
                 },
             });
-            const token = jsonwebtoken_1.default.sign({ userId: user.id, mobile: null, role: user.role }, jwt_1.JWT_SECRET, { expiresIn: '2h' });
+            const token = (0, authService_1.issueAccessToken)(user);
             res.json({ success: true, token, expiresInSec: 2 * 60 * 60 });
         }
         catch (error) {
@@ -197,4 +193,3 @@ Respond with ONLY a raw JSON array (no markdown fences) of exactly 5 objects, ea
         }
     },
 };
-//# sourceMappingURL=demoController.js.map

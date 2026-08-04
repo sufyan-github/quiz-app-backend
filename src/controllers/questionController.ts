@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 import { realtimeService } from '../services/realtimeService';
+import { AuthRequest } from '../middleware/authMiddleware';
+
+const QUESTION_STATUSES = new Set(['DRAFT', 'PUBLISHED', 'PRIVATE', 'ARCHIVED']);
 
 export const getQuestions = async (req: Request, res: Response) => {
   try {
@@ -14,10 +17,16 @@ export const getQuestions = async (req: Request, res: Response) => {
   }
 };
 
-export const createQuestion = async (req: Request, res: Response) => {
+export const createQuestion = async (req: AuthRequest, res: Response) => {
   try {
     const { text, type, difficulty, marks, negativeMarks, language, explanation, hint, subjectId, topicId, options } = req.body;
+    const status = QUESTION_STATUSES.has(req.body.status) ? req.body.status : 'DRAFT';
     
+    if (!text || !Array.isArray(options) || options.length < 2 || options.filter((option: any) => option?.isCorrect === true).length !== 1) {
+      res.status(400).json({ error: 'A question needs text, at least two options, and exactly one correct option.' });
+      return;
+    }
+
     const question = await prisma.question.create({
       data: {
         text,
@@ -30,6 +39,8 @@ export const createQuestion = async (req: Request, res: Response) => {
         hint,
         subjectId,
         topicId,
+        status,
+        createdById: req.user?.userId,
         options: {
           create: options // expects an array of { text, isCorrect }
         }
@@ -37,7 +48,7 @@ export const createQuestion = async (req: Request, res: Response) => {
       include: { options: true }
     });
 
-    realtimeService.emit('questions', 'question_created', { question });
+    realtimeService.emit('questions', 'question_created', { questionId: question.id });
     
     res.status(201).json(question);
   } catch (error) {
@@ -49,25 +60,17 @@ export const deleteQuestion = async (req: Request, res: Response): Promise<void>
   try {
     const id = req.params.id as string;
     
-    // Delete related options first
-    await prisma.option.deleteMany({
-      where: { questionId: id }
-    });
-    
-    // Delete related exam questions
-    await prisma.examQuestion.deleteMany({
-      where: { questionId: id }
-    });
+    const answerCount = await prisma.studentAnswer.count({ where: { questionId: id } });
+    if (answerCount > 0) {
+      res.status(409).json({ error: 'This question has attempt history and cannot be deleted. Archive support is required instead.' });
+      return;
+    }
 
-    // Delete related student answers
-    await prisma.studentAnswer.deleteMany({
-      where: { questionId: id }
-    });
-    
-    // Then delete question
-    await prisma.question.delete({
-      where: { id }
-    });
+    await prisma.$transaction([
+      prisma.option.deleteMany({ where: { questionId: id } }),
+      prisma.examQuestion.deleteMany({ where: { questionId: id } }),
+      prisma.question.delete({ where: { id } }),
+    ]);
 
     realtimeService.emit('questions', 'question_deleted', { id });
     
@@ -82,52 +85,63 @@ export const updateQuestion = async (req: Request, res: Response): Promise<void>
   try {
     const id = req.params.id as string;
     const { text, type, difficulty, marks, negativeMarks, language, explanation, hint, subjectId, topicId, options } = req.body;
+    const status = req.body.status === undefined
+      ? undefined
+      : (QUESTION_STATUSES.has(req.body.status) ? req.body.status : null);
+    if (status === null) {
+      res.status(400).json({ error: 'Invalid question status' });
+      return;
+    }
 
-    // Update question fields
-    const question = await prisma.question.update({
-      where: { id },
-      data: {
-        text,
-        type,
-        difficulty,
-        marks,
-        negativeMarks,
-        language: language || 'english',
-        explanation,
-        hint,
-        subjectId,
-        topicId
+    if (Array.isArray(options) && (options.length < 2 || options.filter((option: any) => option?.isCorrect === true).length !== 1)) {
+      res.status(400).json({ error: 'A question needs at least two options and exactly one correct option.' });
+      return;
+    }
+
+    if (Array.isArray(options)) {
+      const answerCount = await prisma.studentAnswer.count({ where: { questionId: id } });
+      if (answerCount > 0) {
+        res.status(409).json({ error: 'Options cannot be replaced after students have answered this question.' });
+        return;
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.question.update({
+        where: { id },
+        data: { text, type, difficulty, marks, negativeMarks, language: language || 'english', explanation, hint, subjectId, topicId, status },
+      });
+
+      if (Array.isArray(options)) {
+        await tx.option.deleteMany({ where: { questionId: id } });
+        await tx.option.createMany({
+          data: options.map((opt: any) => ({ text: opt.text, isCorrect: !!opt.isCorrect, questionId: id })),
+        });
       }
     });
-
-    // Update options if provided
-    if (options && Array.isArray(options)) {
-      // Clean delete existing options
-      await prisma.option.deleteMany({
-        where: { questionId: id }
-      });
-
-      // Recreate options
-      await prisma.option.createMany({
-        data: options.map((opt: any) => ({
-          text: opt.text,
-          isCorrect: !!opt.isCorrect,
-          questionId: id
-        }))
-      });
-    }
 
     const updatedQuestion = await prisma.question.findUnique({
       where: { id },
       include: { options: true }
     });
 
-    realtimeService.emit('questions', 'question_updated', { question: updatedQuestion });
+    realtimeService.emit('questions', 'question_updated', { questionId: id });
 
     res.json(updatedQuestion);
   } catch (error) {
     console.error('Update question error:', error);
     res.status(500).json({ error: 'Failed to update question' });
+  }
+};
+
+export const archiveQuestion = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const question = await prisma.question.update({ where: { id }, data: { status: 'ARCHIVED' } });
+    realtimeService.emit('questions', 'question_archived', { questionId: id });
+    res.json({ success: true, data: { id: question.id, status: question.status } });
+  } catch {
+    res.status(404).json({ error: 'Question not found' });
   }
 };
 
@@ -236,6 +250,7 @@ export const importQuestions = async (req: Request, res: Response): Promise<void
           marks: 5,
           language: language,
           explanation,
+          status: 'DRAFT',
           topicId,
           subjectId,
           options: {
@@ -254,4 +269,3 @@ export const importQuestions = async (req: Request, res: Response): Promise<void
     res.status(500).json({ error: 'Failed to import questions' });
   }
 };
-

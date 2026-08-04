@@ -8,6 +8,7 @@ router.use(authenticate);
 
 router.get('/profile', getStudentProfile);
 router.put('/profile', updateStudentProfile);
+router.patch('/profile', updateStudentProfile);
 router.get('/dashboard', getStudentDashboard);
 
 export default router;

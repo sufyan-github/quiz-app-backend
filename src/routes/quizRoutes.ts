@@ -15,7 +15,7 @@ router.use(authenticate);
 
 router.get('/categories', quizController.getCategories);
 router.get('/generate', quizController.generateQuiz);
-router.post('/submit', quizController.submitQuiz);
+router.post('/submit', quizController.submitQuizV2);
 router.get('/dashboard', quizController.getDashboard);
 router.get('/leaderboard', quizController.getLeaderboard);
 

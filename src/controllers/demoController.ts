@@ -1,9 +1,8 @@
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
 import { openai } from '../config/openai';
 import { prisma } from '../prisma';
-import { JWT_SECRET } from '../config/jwt';
 import { resolveCategory, sanitizeFreeText } from '../data/demoTaxonomy';
+import { issueAccessToken } from '../services/authService';
 
 // This endpoint is deliberately public (landing-page visitors are not
 // logged in) and therefore cost-bearing without an auth gate. Every
@@ -214,11 +213,7 @@ Respond with ONLY a raw JSON array (no markdown fences) of exactly 5 objects, ea
         },
       });
 
-      const token = jwt.sign(
-        { userId: user.id, mobile: null, role: user.role },
-        JWT_SECRET,
-        { expiresIn: '2h' }
-      );
+      const token = issueAccessToken(user);
 
       res.json({ success: true, token, expiresInSec: 2 * 60 * 60 });
     } catch (error: any) {
